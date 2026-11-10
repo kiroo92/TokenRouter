@@ -157,12 +157,14 @@ export function createProviderEditDraft() {
     openAICompactMode: ref<OpenAICompactMode>('force_on'), // Legacy compaction request mode.
     openAINativeCompactionV2Mode: ref<OpenAICompactMode>('force_on'), // Native compaction request mode.
     openAIResponsesContinuationSupported: ref(false), // HTTP response continuation capability.
+    openAIImagesGIFEnabled: ref(true), // Missing settings enable GIF generation.
     openAIImagesURLToB64JSON: ref(false), // Image URL backfill switch.
     responsesWSConnectionMode: ref<ResponsesWSConnectionMode>(RESPONSES_WS_POOLED), // Responses WebSocket connection mode.
     codexCLIOnlyAllowClaudeCodeEnabled: ref(false), // Claude Code client exemption.
     openAIOAuthClientPolicy: ref<OpenAIOAuthClientPolicy>('any'), // Allowed OAuth client policy.
     codexFingerprintMode: ref<CodexFingerprintMode>('off'), // Codex client fingerprint mode.
     codexImageToolMode: ref<CodexImageToolMode>('inherit'), // Codex image tool policy.
+    codexImageResponsesModel: ref(''), // Blank selects the backend image driver default.
     anthropicPassthroughEnabled: ref(false), // Anthropic direct forwarding switch.
     anthropicAPIKeyAuthScheme: ref<AnthropicAPIKeyAuthScheme>('x_api_key'), // Anthropic API authentication scheme.
     webSearchEmulationMode: ref('default'), // Provider web search override.

@@ -28,7 +28,7 @@ import {
   type EndpointSlotAddresses,
 } from '@/components/provider/form/providerEndpoints'
 import { readUpstreamBalanceAlert } from '@/utils/upstreamBalanceAlert'
-import { readCodexImageToolMode } from '@/utils/codexImageToolMode'
+import { readCodexImageToolMode, readCodexImageResponsesModel } from '@/utils/codexImageToolMode'
 import { RESPONSES_WS_POOLED, readResponsesWSConnectionMode } from '@/utils/responsesWsConnection'
 import { normalizeOpenAICompactMode } from '@/utils/openaiLegacyConfiguration'
 import {
@@ -279,12 +279,14 @@ export function hydrateProviderEditDraft(
     openAICompactMode,
     openAINativeCompactionV2Mode,
     openAIResponsesContinuationSupported,
+    openAIImagesGIFEnabled,
     openAIImagesURLToB64JSON,
     responsesWSConnectionMode,
     codexCLIOnlyAllowClaudeCodeEnabled,
     openAIOAuthClientPolicy,
     codexFingerprintMode,
     codexImageToolMode,
+    codexImageResponsesModel,
     anthropicPassthroughEnabled,
     anthropicAPIKeyAuthScheme,
     webSearchEmulationMode,
@@ -553,6 +555,7 @@ export function hydrateProviderEditDraft(
   openAICompactMode.value = 'force_on'
   openAINativeCompactionV2Mode.value = 'force_on'
   openAIResponsesContinuationSupported.value = false
+  openAIImagesGIFEnabled.value = extra?.images_gif_enabled !== false
   openAIImagesURLToB64JSON.value = false
   openAICompactModelMappings.value = []
   responsesWSConnectionMode.value = RESPONSES_WS_POOLED
@@ -560,6 +563,7 @@ export function hydrateProviderEditDraft(
   openAIOAuthClientPolicy.value = 'any'
   codexFingerprintMode.value = 'off'
   codexImageToolMode.value = 'inherit'
+  codexImageResponsesModel.value = ''
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
@@ -589,6 +593,7 @@ export function hydrateProviderEditDraft(
       openAIImagesURLToB64JSON.value = extra?.images_url_to_b64_json === true
     }
     codexImageToolMode.value = readCodexImageToolMode(extra)
+    codexImageResponsesModel.value = readCodexImageResponsesModel(extra)
     responsesWSConnectionMode.value = readResponsesWSConnectionMode(extra)
     if (newProvider.type === 'oauth') {
       openAIOAuthClientPolicy.value = normalizeOpenAIOAuthClientPolicy(

@@ -1,6 +1,6 @@
-import { defineComponent, nextTick } from 'vue'
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, nextTick, reactive } from 'vue'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ModelMarketplaceView from '../ModelMarketplaceView.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import { modelIconData } from '@/utils/modelIconData'
@@ -11,12 +11,16 @@ import type { MarketplaceGroup, MarketplaceModelPricing } from '@/api/marketplac
 // metadata, discount explanations, and pricing selection through mounted components while
 // replacing layout and network collaborators.
 
+// Hoisted collaborators isolate public data loading, session initialization,
+// settings access, and clipboard writes so page effects remain directly observable.
+const getAvailableMarketplaceModels = vi.hoisted(() => vi.fn())
 const getMarketplaceModels = vi.hoisted(() => vi.fn())
 const checkAuth = vi.hoisted(() => vi.fn())
 const fetchPublicSettings = vi.hoisted(() => vi.fn())
 const copyToClipboard = vi.hoisted(() => vi.fn())
 
 vi.mock('@/api/marketplace', () => ({
+  getAvailableMarketplaceModels,
   getMarketplaceModels,
 }))
 
@@ -24,12 +28,20 @@ vi.mock('@/composables/useClipboard', () => ({
   useClipboard: () => ({ copied: { value: false }, copyToClipboard }),
 }))
 
+// Reactive identity changes let lifecycle tests observe synchronous private-data removal.
+const authState = reactive({
+  isAuthenticated: true,
+  isAdmin: false,
+  user: { id: 7 } as { id: number } | null,
+  checkAuth,
+})
+
+enableAutoUnmount(afterEach)
+
 vi.mock('@/stores', () => ({
-  useAuthStore: () => ({
-    isAuthenticated: true,
-    isAdmin: false,
-    checkAuth,
-  }),
+  // useAuthStore shares the mutable fixture identity with mounted marketplace views.
+  useAuthStore: () => authState,
+  // useAppStore supplies loaded public branding without requiring a real settings store.
   useAppStore: () => ({
     siteName: 'TokenRouter',
     siteLogo: '',
@@ -160,7 +172,6 @@ function marketplaceGroup(
     id,
     name,
     description: `${name} group`,
-    platform: 'openai',
     display_brand: 'OpenAI',
     sort_order: id,
     rate_multiplier: id,
@@ -227,17 +238,144 @@ function visibleTooltips() {
 describe('ModelMarketplaceView', () => {
   beforeEach(() => {
     localStorage.clear()
+    authState.isAuthenticated = true
+    authState.user = { id: 7 }
+    getAvailableMarketplaceModels.mockReset()
+    getMarketplaceModels.mockReset()
+    getAvailableMarketplaceModels.mockResolvedValue(marketplaceFixture())
     getMarketplaceModels.mockResolvedValue(marketplaceFixture())
     checkAuth.mockClear()
     fetchPublicSettings.mockClear()
     copyToClipboard.mockClear()
   })
 
+  // Guest browsing stays on the public endpoint even though personal browsing exists.
+  // Authenticated visits use the protected endpoint without changing homepage API defaults.
+  it('selects public and personal endpoints from authentication', async () => {
+    const personal = await mountMarketplace()
+    expect(getAvailableMarketplaceModels).toHaveBeenCalledOnce()
+    expect(getMarketplaceModels).not.toHaveBeenCalled()
+    personal.unmount()
+    authState.isAuthenticated = false
+    authState.user = null
+    const guest = await mountMarketplace()
+    expect(getMarketplaceModels).toHaveBeenCalledOnce()
+    expect(guest.find('[data-testid="group-exclusive-tag"]').exists()).toBe(false)
+  })
+
+  // Private groups sort ahead of public groups with stable order and ID ties.
+  // Their inline labels remain visible when the same catalog is searched or filtered.
+  it('places exclusive cards first and retains their labels through filters', async () => {
+    const fixture = marketplaceFixture()
+    fixture[1] = { ...fixture[1], is_exclusive: true, sort_order: 9 }
+    fixture[3] = { ...fixture[3], is_exclusive: true, sort_order: 9 }
+    getAvailableMarketplaceModels.mockResolvedValue([
+      fixture[3],
+      fixture[2],
+      fixture[1],
+      fixture[0],
+    ])
+    const wrapper = await mountMarketplace()
+    const sections = wrapper.findAll('[data-testid="marketplace-group-section"]')
+    expect(sections.map((section) => section.get('h2').text())).toEqual([
+      'Pro',
+      'Pro 2',
+      'Plus',
+      'Plus 2',
+    ])
+    expect(wrapper.findAll('[data-testid="group-exclusive-tag"]')).toHaveLength(2)
+    await wrapper.get('[data-testid="marketplace-search"]').setValue('Pro 2')
+    expect(wrapper.findAll('[data-testid="marketplace-group-section"]')).toHaveLength(1)
+    expect(wrapper.get('[data-testid="group-exclusive-tag"]').text()).toBe('marketplace.exclusive')
+    await wrapper.get('[data-testid="marketplace-search"]').setValue('')
+    await wrapper.get('[data-testid="select-option-2"]').trigger('click')
+    expect(wrapper.findAll('[data-testid="marketplace-group-section"]')).toHaveLength(1)
+    expect(wrapper.get('[data-testid="group-exclusive-tag"]').exists()).toBe(true)
+  })
+
+  // Logout replaces an outstanding personal request with a public catalog request.
+  // Late private success or failure cannot overwrite guest data or its loading state.
+  it.each(['success', 'failure'])('rejects a late private %s after logout', async (completion) => {
+    let resolveOld!: (groups: MarketplaceGroup[]) => void
+    let rejectOld!: (error: Error) => void
+    getAvailableMarketplaceModels.mockImplementationOnce(
+      () =>
+        new Promise((resolve, reject) => {
+          resolveOld = resolve
+          rejectOld = reject
+        }),
+    )
+    const wrapper = await mountMarketplace()
+    authState.isAuthenticated = false
+    authState.user = null
+    await flushPromises()
+    const privateGroup = {
+      ...marketplaceFixture()[0],
+      name: 'Old private account',
+      is_exclusive: true,
+    }
+    if (completion === 'success') resolveOld([privateGroup])
+    else rejectOld(new Error('Old account failed'))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Old private account')
+    expect(wrapper.text()).not.toContain('Old account failed')
+    expect(wrapper.findAll('[data-testid="marketplace-group-section"]')).toHaveLength(4)
+    expect(wrapper.find('[data-testid="marketplace-skeleton"]').exists()).toBe(false)
+  })
+
+  // Switching accounts clears rendered private data before the new read completes.
+  // A selected group absent from the new account resets so its catalog remains visible.
+  it('clears prior account groups and resets an unavailable group filter', async () => {
+    getAvailableMarketplaceModels.mockResolvedValueOnce([
+      { ...marketplaceFixture()[0], is_exclusive: true },
+    ])
+    const wrapper = await mountMarketplace()
+    await wrapper.get('[data-testid="select-option-1"]').trigger('click')
+    let resolveNew!: (groups: MarketplaceGroup[]) => void
+    getAvailableMarketplaceModels.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveNew = resolve
+        }),
+    )
+    authState.user = { id: 8 }
+    await nextTick()
+    expect(wrapper.find('[data-testid="group-exclusive-tag"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="marketplace-skeleton"]').exists()).toBe(true)
+    resolveNew([{ ...marketplaceFixture()[1], name: 'New account', is_exclusive: true }])
+    await flushPromises()
+    expect(wrapper.get('[data-testid="marketplace-group-section"] h2').text()).toBe('New account')
+  })
+
+  // Locale reloads can finish after a more recent account request has succeeded.
+  // Request generations keep the newest catalog and ignore errors from older reads.
+  it('rejects an older locale response after switching accounts', async () => {
+    const wrapper = await mountMarketplace()
+    let resolveOld!: (groups: MarketplaceGroup[]) => void
+    getAvailableMarketplaceModels.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve
+        }),
+    )
+    window.dispatchEvent(new Event('locale-changed'))
+    await flushPromises()
+    getAvailableMarketplaceModels.mockResolvedValueOnce([
+      { ...marketplaceFixture()[1], name: 'Latest account' },
+    ])
+    authState.user = { id: 8 }
+    await flushPromises()
+    resolveOld([{ ...marketplaceFixture()[0], name: 'Previous locale', is_exclusive: true }])
+    await flushPromises()
+    expect(wrapper.text()).toContain('Latest account')
+    expect(wrapper.text()).not.toContain('Previous locale')
+  })
+
   // Pending catalog requests display placeholders for the vertical group list.
   // Resolving the response exposes every group summary with its models initially collapsed.
   it('取数期间保留分组列表占位，不提前显示空状态', async () => {
     let resolveModels!: (value: MarketplaceGroup[]) => void
-    getMarketplaceModels.mockImplementationOnce(
+    getAvailableMarketplaceModels.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           resolveModels = resolve
@@ -260,7 +398,7 @@ describe('ModelMarketplaceView', () => {
   it('lists collapsed groups and expands their models independently', async () => {
     const fixture = marketplaceFixture()
     fixture[1].models = [marketplaceModel('pro-model', 'Pro Model', tokenPricing)]
-    getMarketplaceModels.mockResolvedValueOnce(fixture)
+    getAvailableMarketplaceModels.mockResolvedValueOnce(fixture)
     const wrapper = await mountMarketplace()
     const sections = wrapper.findAll('[data-testid="marketplace-group-section"]')
     const toggles = wrapper.findAll('[data-testid="marketplace-group-toggle"]')
@@ -293,7 +431,7 @@ describe('ModelMarketplaceView', () => {
     const models = Array.from({ length: 25 }, (_, index) =>
       marketplaceModel(`model-${index}`, `Model ${index}`, tokenPricing),
     )
-    getMarketplaceModels.mockResolvedValueOnce([
+    getAvailableMarketplaceModels.mockResolvedValueOnce([
       marketplaceGroup(1, 'Large', models),
       marketplaceGroup(2, 'Other', [marketplaceModel('other', 'Other Model', tokenPricing)]),
     ])
@@ -346,7 +484,7 @@ describe('ModelMarketplaceView', () => {
     expect(wrapper.findAll('[data-testid="marketplace-group-section"]')).toHaveLength(4)
     expect(wrapper.get('#marketplace-group-toggle-2').attributes('aria-expanded')).toBe('true')
     expect(wrapper.get('#marketplace-group-toggle-3').attributes('aria-expanded')).toBe('true')
-    getMarketplaceModels.mockResolvedValueOnce([marketplaceFixture()[2]])
+    getAvailableMarketplaceModels.mockResolvedValueOnce([marketplaceFixture()[2]])
     window.dispatchEvent(new Event('locale-changed'))
     await flushPromises()
     expect(
@@ -371,7 +509,7 @@ describe('ModelMarketplaceView', () => {
         days: [],
       },
     }
-    getMarketplaceModels.mockResolvedValue(fixture)
+    getAvailableMarketplaceModels.mockResolvedValue(fixture)
 
     const wrapper = await mountMarketplace()
 
@@ -393,7 +531,7 @@ describe('ModelMarketplaceView', () => {
     // Ratios at or above one represent ordinary pricing; missing ratios mean the backend supplied no official-price comparison.
     fixture[1] = { ...fixture[1], official_price_ratio: 1.2 }
     fixture[2] = { ...fixture[2], official_price_ratio: undefined }
-    getMarketplaceModels.mockResolvedValue(fixture)
+    getAvailableMarketplaceModels.mockResolvedValue(fixture)
 
     const wrapper = await mountMarketplace()
     const sections = wrapper.findAll('[data-testid="marketplace-group-section"]')
@@ -424,7 +562,7 @@ describe('ModelMarketplaceView', () => {
     fixture[0] = { ...fixture[0], hide_max_discount: true, hide_rate_multiplier: false }
     fixture[1] = { ...fixture[1], hide_max_discount: false, hide_rate_multiplier: true }
     fixture[2] = { ...fixture[2], hide_max_discount: true, hide_rate_multiplier: true }
-    getMarketplaceModels.mockResolvedValue(fixture)
+    getAvailableMarketplaceModels.mockResolvedValue(fixture)
 
     const wrapper = await mountMarketplace()
     for (const [index, group] of fixture.entries()) {
@@ -455,7 +593,7 @@ describe('ModelMarketplaceView', () => {
         { min_tokens: 100, max_tokens: null, input_price_per_token: 0.000002 },
       ],
     }
-    getMarketplaceModels.mockResolvedValue(fixture)
+    getAvailableMarketplaceModels.mockResolvedValue(fixture)
     const wrapper = await mountMarketplace(true)
     const section = wrapper.findAll('[data-testid="marketplace-group-section"]')[0]
     expect(section.text()).toContain('0.00')
@@ -513,7 +651,7 @@ describe('ModelMarketplaceView', () => {
         },
       ],
     }
-    getMarketplaceModels.mockResolvedValue(fixture)
+    getAvailableMarketplaceModels.mockResolvedValue(fixture)
 
     const wrapper = await mountMarketplace(true)
     const sections = wrapper.findAll('[data-testid="marketplace-group-section"]')
@@ -536,7 +674,7 @@ describe('ModelMarketplaceView', () => {
       input_modalities: ['text', 'image', 'audio', 'video'],
       output_modalities: ['text'],
     }))
-    getMarketplaceModels.mockResolvedValue(fixture)
+    getAvailableMarketplaceModels.mockResolvedValue(fixture)
     const wrapper = await mountMarketplace(true)
     const cards = wrapper.findAll('[data-testid="marketplace-group-section"]')[0].findAll('article')
     expect(cards).toHaveLength(2)
@@ -553,7 +691,7 @@ describe('ModelMarketplaceView', () => {
   // An expanded model provides protocols without a separate attributes object.
   // Its information control exposes ordered protocols, endpoint descriptions, and native-route indicators in the tooltip.
   it('模型信息浮层按目录顺序列出可用协议并标出原生协议，没有属性时也显示入口', async () => {
-    getMarketplaceModels.mockResolvedValueOnce([
+    getAvailableMarketplaceModels.mockResolvedValueOnce([
       marketplaceGroup(1, 'Plus', [
         {
           ...marketplaceModel('gpt-5.5', 'GPT 5.5', tokenPricing),
@@ -595,7 +733,7 @@ describe('ModelMarketplaceView', () => {
       name: 'Grok',
       display_brand: 'xAI',
     }
-    getMarketplaceModels.mockResolvedValue(fixture)
+    getAvailableMarketplaceModels.mockResolvedValue(fixture)
 
     const wrapper = await mountMarketplace()
 
@@ -617,7 +755,7 @@ describe('ModelMarketplaceView', () => {
     ['自定义分组', 'zai'],
     ['自定义分组', 'z.ai'],
   ])('分组 %s、展示品牌 %s 显示智谱图标', async (name, displayBrand) => {
-    getMarketplaceModels.mockResolvedValue([
+    getAvailableMarketplaceModels.mockResolvedValue([
       {
         ...marketplaceGroup(1, name, [marketplaceModel('glm-5', 'GLM 5', tokenPricing)]),
         display_brand: displayBrand,
@@ -645,7 +783,7 @@ describe('ModelMarketplaceView', () => {
 
       models: [marketplaceModel('gpt-image-1', 'GPT Image', imagePricing)],
     }
-    getMarketplaceModels.mockResolvedValue(fixture)
+    getAvailableMarketplaceModels.mockResolvedValue(fixture)
 
     const wrapper = await mountMarketplace()
 
@@ -701,7 +839,7 @@ describe('ModelMarketplaceView', () => {
 // Public model cards display the quoted video unit and expose its filter.
 // Selecting video pricing removes token models while retaining free video tiers.
 it('shows and filters custom video prices', async () => {
-  getMarketplaceModels.mockResolvedValueOnce([
+  getAvailableMarketplaceModels.mockResolvedValueOnce([
     marketplaceGroup(1, 'Videos', [
       marketplaceModel('custom-video', 'Custom Video', {
         pricing_mode: 'video',

@@ -17,7 +17,8 @@ import (
 	"github.com/TokenFlux/TokenRouter/internal/server/middleware"
 )
 
-// Production registration must agree with the saved HTTP method/path inventory
+// http_routes_registration_scenario_test.go checks production route registration.
+// Registration must agree with the saved HTTP method/path inventory
 // and preserve guard order. An early middleware captures the selected chain
 // then aborts, letting the scenario dispatch every route safely with
 // constructed placeholder handlers and inspect removed administration paths
@@ -41,6 +42,7 @@ func TestNativeRouteInventory(t *testing.T) {
 	routeInventoryMount[adminRouteMount](t, provideAdminRouteMount)(v1, security, noop)
 	routeInventoryMount[gatewayRouteMount](t, provideGatewayRouteMount)(r)
 	routeInventoryMount[paymentRouteMount](t, providePaymentRouteMount)(v1, security)
+	routeInventoryMount[pluginRouteMount](t, providePluginRouteMount)(v1, security)
 	raw, err := os.ReadFile("testdata/routes.json")
 	require.NoError(t, err)
 	var expected []string
@@ -74,6 +76,10 @@ func TestNativeRouteInventory(t *testing.T) {
 				}
 			}
 			return -1
+		}
+		if route.Path == "/api/v1/marketplace/models/available" {
+			require.GreaterOrEqual(t, position("inventoryJWT"), 0)
+			require.Greater(t, position("inventoryAudit"), position("inventoryJWT"))
 		}
 		if position("inventoryAdmin") >= 0 {
 			require.NotNil(t, descriptions[route.Method+" "+route.Path], "administrator route lacks operation metadata: "+route.Path)

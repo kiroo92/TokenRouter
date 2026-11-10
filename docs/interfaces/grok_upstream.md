@@ -16,7 +16,7 @@ TokenRouter 支持 Grok OAuth 订阅提供商和标准的 xAI API Key 提供商�
 - [凭据与健康](#凭据与健康)：修改凭据失效、额度观测和错误恢复时读取。
 - [客户端配置](#客户端配置)：核对生成给客户端的 base URL。
 - [模型与执行规则](#模型与执行规则)：修改候选、推理档位和默认请求型号时读取。
-- [环境变量](#环境变量)：修改 OAuth 或上游运行参数时读取。
+- [进程配置](#进程配置)：修改 OAuth 或上游运行参数时读取。
 
 ## 基本信息
 
@@ -33,7 +33,7 @@ Grok 的原生协议集合包括 HTTP Responses、Chat、Images、视频和 Voic
 
 原生 Responses 在同一提供商内，保留一次密文和 Compact 的解码恢复；Chat 转 Responses 和图片辅助请求只交换一次。HTTP 提交、关闭重试窗口、语义输出和 TTFT 是四个独立的观测。执行结果可以和错误同时存在，Grok 的失败入口按自己的规则判断能否结算；只看到响应 ID、前导事件或部分输出，不足以执行"成功之后"才做的操作。
 
-Grok Responses 的上游可能插入严格客户端不认识的 `event: ping` 帧。流式转发会把 data 里没有声明冲突事件类型的 ping，改写成 `: ping` 的 SSE 注释：连接保持活跃，Grok CLI 和 Codex CLI 也不会因此中断。普通事件、带未知字段的帧和结尾的用量事件，原样进入公共的流处理链路。
+Grok 的 `event: ping` 按通用规则在上游一侧丢弃，下游连接由统一组件维护，详见[SSE 保活](../architecture/gateway_request_lifecycle.md#sse_keepalive)。JSON type 声明实际业务事件时保留该数据；未知字段、缓冲上限和不完整帧使用通用过滤器的保守放行规则。
 
 Responses WebSocket 是 Grok 和 OpenAI 的原生传输能力，兼容 Responses 的开关不会把它扩展到其他平台。图片和视频由独立的媒体资格和分组策略控制，与文本协议集合无关。
 
@@ -44,9 +44,9 @@ Responses WebSocket 是 Grok 和 OpenAI 的原生传输能力，兼容 Responses
 
 管理员的 Grok 授权和 SSO 导入 HTTP 由 `provider/httpapi` 接入；导入队列、配额探测和模型观测共用提供商运行时。Responses、Chat 桥接、Composer 图片辅助请求、媒体和 Voice 由 `gateway/httpapi.GrokExecutor` 接入，响应解析复用 upstream 和共享的 `OpenAIResponseOutput`。app 绑定凭据、健康、HTTP 池、TLS 和同一个 WS 拨号器；Realtime 连接和视频内容流分别通过各自的接口释放。Chat 桥接不适用时，回到原生的 Chat 分支；提供商切换、入站编排和资金完成由请求的负责方处理。
 
-管理员可以在控制台选择 OAuth 或 API Key 创建提供商。OAuth 提供商可以通过浏览器授权、refresh token 或 SSO cookie 创建和重新授权；把提供商绑定到分组后，用户就可以生成这个分组的 API Key。OAuth 的 state 和 PKCE 会话优先保存在 Redis，并用一次性消费标记防止多实例重复兑换；Redis 写入失败时，才使用进程内的短期存储。SSO cookie、邮箱密码等临时输入，只用于兑换 Build OAuth token，不会写进提供商凭据、响应或日志。
+管理员可以在控制台选择 OAuth 或 API Key 创建提供商。OAuth 提供商可以通过浏览器授权、refresh token 或 SSO cookie 创建和重新授权；把提供商绑定到分组后，用户就可以生成这个分组的 API Key。OAuth 的 state 和 PKCE 会话优先保存在 Redis，并用一次性消费标记防止并发请求重复兑换；Redis 写入失败时，才使用进程内的短期存储。SSO cookie、邮箱密码等临时输入，只用于兑换 Build OAuth token，不会写进提供商凭据、响应或日志。
 
-邮箱密码授权由进程配置 `gateway.grok.password_auth_enabled` 控制，默认关闭，管理端不显示入口。即使手动开启，服务也只把密码临时换成 SSO，再换成 OAuth token。重新授权成功后，清除 Grok 软性消费上限的重新授权标记，并按凭据快照和 CAS 规则更新提供商，旧请求无法覆盖新的 token。
+邮箱密码授权由进程配置 `provider.grok.password_auth_enabled` 控制，默认关闭，管理端不显示入口。即使手动开启，服务也只把密码临时换成 SSO，再换成 OAuth token。重新授权成功后，清除 Grok 软性消费上限的重新授权标记，并按凭据快照和 CAS 规则更新提供商，旧请求无法覆盖新的 token。
 
 `provider/provider` 统一处理文本和媒体的端点：手动配置的自定义地址保持不变；OAuth 的官方 CLI 主机，在媒体请求里改为官方的媒体 API。实际请求照常执行 URL 信任检查；这个选择不影响官方的授权和刷新端点。
 
@@ -94,7 +94,7 @@ Voice 的 HTTP 入口包括 TTS、STT，以及自定义 Voice 的创建、读取
 
 新视频请求成功后，从上游响应的 `request_id`、`id` 或 `task_id`（包括 `data.*`、`video.*` 的嵌套形式）里提取任务标识，`request_id` 和 `id` 的优先级保持不变。服务按"规范化的任务标识 + `user_id` + `api_key_id`"，保存所选的分组和提供商绑定。之后的状态查询和 content 下载，回到创建任务的那个提供商，不再重新调度。复合 Key 的映射后来被删除时，服务仍然可以从持久化或缓存的绑定，构造一个只用于查询旧任务的最小 Grok 分组视图。查询已有任务不要求提供商仍然具备"新媒体生成"的资格，但 Key、用户和任务归属照常校验。
 
-视频 content 先确认任务状态，再用服务端的上游凭据代理下载，并安全地透传 Range 和内容相关的头；上游 URL 和 bearer token 不会返回给客户端。异步视频创建成功时，只保存模型、计费模型、分辨率、时长和创建时间的快照，不立即扣费；状态查询或 content 下载第一次观察到官方的 `status=done`、并且有 `video.url` 时，才尝试结算。模型和时长优先取完成响应里的值，分辨率取创建时的快照；时长缺失时先取创建快照，再用 8 秒。分辨率只在空值时默认 480p，自定义标签和完整的正数秒数会保留到 Usage Log 与计费，计费层不限制为 15 秒。模型缺失时使用官方默认的型号族。多实例通过 Redis `SET NX` 领取一次性的结算权；持久化结算失败时释放领取，留给之后的轮询重试，并用任务 ID 派生的稳定 request ID 防止重复扣费。普通的查询和下载不会产生第二笔费用。
+视频 content 先确认任务状态，再用服务端的上游凭据代理下载，并安全地透传 Range 和内容相关的头；上游 URL 和 bearer token 不会返回给客户端。异步视频创建成功时，只保存模型、计费模型、分辨率、时长和创建时间的快照，不立即扣费；状态查询或 content 下载第一次观察到官方的 `status=done`、并且有 `video.url` 时，才尝试结算。模型和时长优先取完成响应里的值，分辨率取创建时的快照；时长缺失时先取创建快照，再用 8 秒。分辨率只在空值时默认 480p，自定义标签和完整的正数秒数会保留到 Usage Log 与计费，计费层不限制为 15 秒。模型缺失时使用官方默认的型号族。并发的查询和下载请求通过 Redis `SET NX` 领取一次性的结算权；持久化结算失败时释放领取，留给之后的轮询重试，并用任务 ID 派生的稳定 request ID 防止重复扣费。普通的查询和下载不会产生第二笔费用。
 
 视频任务摘要按每次状态查询的上游状态更新，`done`、`failed`、`expired` 和取消状态都会结束摘要。该更新先于计费认领，零费用失败与已计费任务的再次查询同样会记录终态。请求记录规则见[请求 ID 与请求查询](../operations/request_lookup.md#request_storage)。
 
@@ -120,24 +120,20 @@ Grok Build CLI 的模型配置指向 TokenRouter 对外的地址（以 `/v1` 结
 
 模型名称和候选来自统一目录。白名单为空时允许任意 ID，未知型号由上游处理。Chat 到 Responses 的适配资格、推理档位、媒体请求默认值和套餐额度观测由 Grok 执行规则决定。
 
-文本和媒体入口使用手动映射后的完整模型 ID。推理属性由[统一解析器](model_catalog_and_marketplace.md#model_attributes)读取 xAI 服务的目录条目并叠加管理员覆盖。Grok 4.6/4.7 的 xhigh、4.3 的 none、4.5 的 low/medium/high 分别来自各自条目。Build 0.1 与 4.20 reasoning 会推理但没有可调档位，模型列表也展示空集合。Composer 的参数清理和 4.20 系列的 logprobs 限制属于平台执行规则。 Messages 和 WebSocket 在最终模型确定后应用同一属性结果，再生成缓存身份。已知没有可调档位的型号会移除 effort；目录缺项的型号保留客户端传值。
+文本和媒体入口使用手动映射后的完整模型 ID。推理属性由[统一解析器](model_catalog_and_marketplace.md#model_attributes)读取 xAI 服务的目录条目并叠加管理员覆盖。Grok 4.5/4.6/4.7 的 xhigh 和 4.3 的 none 分别来自各自条目。Build 0.1 与 4.20 reasoning 会推理但没有可调档位，模型列表也展示空集合。Composer 的参数清理和 4.20 系列的 logprobs 限制属于平台执行规则。 Messages 和 WebSocket 在最终模型确定后应用同一属性结果，再生成缓存身份。已知没有可调档位的型号会移除 effort；目录缺项的型号保留客户端传值。
 
 `grok-latest`、`grok-build-latest` 与未登记的供应商别名按完整 ID 处理。缺少目录记录时保留明确的请求参数，准入继续检查白名单和协议资格。健康状态、缓存和价格使用各自已经确定的完整模型身份。
 
 未知的 Grok 文本型号没有手动定价时保持缺价，不会借用 `grok-4.6` 或其他型号的价格。图片和视频按完整的型号、尺寸和分辨率查询独立的目录报价，Voice 和搜索读取手动配置的操作价格。
 
-## 环境变量
+## 进程配置
 
-- `XAI_OAUTH_CLIENT_ID`
-- `XAI_OAUTH_SCOPE`
-- `XAI_OAUTH_REDIRECT_URI`
-- `XAI_OAUTH_AUTHORIZE_URL`
-- `XAI_OAUTH_TOKEN_URL`
-- `XAI_BASE_URL`
-- `XAI_GROK_CLI_VERSION`：覆盖 Grok CLI 的客户端版本和 User-Agent 中的版本；内置版本为 `1.0.67`。覆盖值需要是不带 `v` 前缀、不含 build metadata 的规范 SemVer。发往 `cli-chat-proxy.grok.com` 的请求在传输层要求覆盖值不低于内置版本，否则使用内置版本。
+Grok 覆盖值位于 `provider.grok`：OAuth 字段在 `oauth.authorize_url`、`token_url`、`client_id`、`scope`、`redirect_uri`，API 地址使用 `base_url`，客户端版本使用 `cli_version`。`allow_unsafe_url_overrides` 和 `unsafe_allow_concurrency_above_one` 是独立的显式放宽开关；密码登录验证码密钥使用 `yescaptcha_client_key`。
 
-进程配置 `gateway.grok` 还包括 Free OAuth 提供商的本地滚动窗口软门禁：默认 24 小时、500000 token、95% 时停调、统计缓存 60 秒。只有明确标记为 Free 的提供商参与；未知或付费的档位，以及数据库或统计查询失败时，都放行（fail-open）。管理端主动的额度查询和导入时的探测，不经过这个软门禁。门禁判断和缓存由 `provider.FreeQuotaGate` 负责，app 传入配置，绑定 usage 批量统计和后台任务屏障；两条普通选择链各自共用自己的缓存，高级调度器按实例使用独立的缓存，第一次缓存未命中时照常放行，并在后台刷新。
+这些值在 app 构造依赖前发布为进程配置，不再读取 `XAI_*` 或 `YESCAPTCHA_*` 隐式覆盖。v1 升级会导入旧值。CLI 覆盖仍要求不带 `v`、不含 build metadata 的规范 SemVer；代理传输继续执行其最低版本检查。
 
-自定义的 base URL，以及媒体和 billing 的子路径，都要通过同一个 URL allowlist 和 SSRF 校验。环境变量里的 client secret、token 和上游 URL，不会进入前端配置或错误响应。
+`scheduling.grok_free_quota` 控制 Free OAuth 提供商的本地滚动窗口软门禁：默认 24 小时、500000 token、95% 时停调、统计缓存 60 秒。只有明确标记为 Free 的提供商参与；未知或付费的档位，以及数据库或统计查询失败时，都放行（fail-open）。管理端主动的额度查询和导入时的探测，不经过这个软门禁。门禁判断和缓存由 `provider.FreeQuotaGate` 负责，app 传入配置，绑定 usage 批量统计和后台任务屏障；两条普通选择链各自共用自己的缓存，高级调度器按实例使用独立的缓存，第一次缓存未命中时照常放行，并在后台刷新。
+
+自定义的 base URL，以及媒体和 billing 的子路径，都要通过同一个 URL allowlist 和 SSRF 校验。配置中的 client secret、token 和上游 URL，不会进入前端配置或错误响应。
 
 相关文档：[上游提供商能力矩阵](upstream_provider_matrix.md)、[网关请求生命周期](../architecture/gateway_request_lifecycle.md)、[路由与结算](../domains/routing_and_billing.md)、[HTTP 接口](http_api.md)、[接口目录](index.md)。

@@ -176,3 +176,9 @@ func TestClientProviderIDMatchesAPIAndInjection(t *testing.T) {
 		require.Equal(t, want, fields["client_provider_id"])
 	}
 }
+
+// LoadSiteShareImage leaves this text-only fixture without an uploaded cover.
+func (calendarPublicSource) LoadSiteShareImage(context.Context) (string, error) { return "", nil }
+
+// LoadSiteShareImage keeps ticket visibility fixtures independent of uploaded cover images.
+func (ticketPublicSource) LoadSiteShareImage(context.Context) (string, error) { return "", nil }

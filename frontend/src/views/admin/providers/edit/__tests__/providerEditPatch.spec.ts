@@ -38,6 +38,23 @@ function provider(overrides: Partial<Provider> = {}): Provider {
 }
 
 describe('provider edit patch representations', () => {
+  // Each OpenAI authentication type hydrates a disabled GIF flag and can restore
+  // its default. Editing must preserve unrelated metadata while retaining explicit false.
+  it.each(['oauth', 'apikey'] as const)('preserves GIF policy for %s providers', (type) => {
+    const source = provider({ type, extra: { images_gif_enabled: false, retained: true } })
+    const draft = createProviderEditDraft()
+    hydrateProviderEditDraft(draft, source, { loadFromExtra: vi.fn(), reset: vi.fn() })
+    expect(draft.openAIImagesGIFEnabled.value).toBe(false)
+    const disabled = buildProviderBasePatch(draft)
+    applyProviderExtraPatch(draft, source, disabled, vi.fn())
+    expect(disabled.extra?.images_gif_enabled).toBe(false)
+    draft.openAIImagesGIFEnabled.value = true
+    const enabled = buildProviderBasePatch(draft)
+    applyProviderExtraPatch(draft, source, enabled, vi.fn())
+    expect(enabled.extra).not.toHaveProperty('images_gif_enabled')
+    expect(enabled.extra?.retained).toBe(true)
+  })
+
   // Separate dialogs receive their own nested endpoint maps and model arrays.
   // Mutating one draft leaves the other draft's default values and collections unchanged.
   it('allocates independent draft refs and nested collections', () => {
@@ -169,5 +186,21 @@ describe('provider edit patch representations', () => {
     expect(Object.keys(patch.extra ?? {}).filter((key) => key.startsWith('quota_'))).toEqual([])
     expect(source.extra?.quota_monthly_limit).toBe(25)
     expect(writeNotifications).toHaveBeenCalledWith(patch.extra, 'update')
+  })
+  // A saved OAuth driver is hydrated, edited, and cleared through the same draft.
+  // Both writes preserve unrelated metadata and clearing submits an explicit blank.
+  it('hydrates and clears an OAuth image driver override', () => {
+    const source = provider({
+      type: 'oauth',
+      extra: { codex_image_responses_model: 'gpt-6.1-sol', retained: true },
+    })
+    const draft = createProviderEditDraft()
+    hydrateProviderEditDraft(draft, source, { loadFromExtra: vi.fn(), reset: vi.fn() })
+    expect(draft.codexImageResponsesModel.value).toBe('gpt-6.1-sol')
+    draft.codexImageResponsesModel.value = ''
+    const patch = buildProviderBasePatch(draft)
+    applyProviderExtraPatch(draft, source, patch, vi.fn())
+    expect(patch.extra?.codex_image_responses_model).toBe('')
+    expect(patch.extra?.retained).toBe(true)
   })
 })

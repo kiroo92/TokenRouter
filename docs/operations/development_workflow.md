@@ -10,7 +10,7 @@
 - [后端文件组织](#backend_file_layout)：新增、拆分、合并或改名后端 Go 文件和测试文件，或编写文件总览时读取，文件内的声明顺序也在这一节。
 - [生成代码与迁移](#生成代码与迁移)：修改 Ent schema、Wire 或数据库时读取。
 - [验证策略](#验证策略)：实现完成、提交之前读取。
-- [提交与文档](#提交与文档)：形成提交或维护 Project Doc 时读取。
+- [提交与文档](#提交与文档)：形成提交、创建 Issue 或 PR、维护 Project Doc 时读取。
 - [同步上游](#同步上游)：引入 upstream 的 PR 或 commit 时读取。
 - [发布](#发布)：创建版本 tag 之前读取。
 
@@ -90,6 +90,8 @@ HTTP、用例、存储和后台资源，由 app 装配各模块的实现。业�
 
 ### 各模块的依赖规则
 
+- plugin：核心可以引用独立 SDK 的 manifest、索引和生成协议类型。go-plugin、gRPC 服务、进程、包文件与测试宿主属于适配或测试层；SDK 使用主仓库的导入前缀，架构检查仍单独禁止核心引用 SDK 的运行时和文件实现。
+
 - creative：`provider/openai.go` 可以读取 `upstream/openai` 的共享 Images 响应解析器，让非流式任务使用仅流式的提供商；这项依赖按文件限制，其余创作台代码沿用已有范围。
 
 - billing：缓存和提醒设置的读取，按核心角色和模块关系许可；app 负责组合动态设置、价格配置、通知、推广、提供商 outbox 和支付能力。公告和 billing 的用户读取直接使用 identity 的数据。PostgreSQL 和 Redis 适配层不互相继承存储客户端的许可；同连接的资金参与、跨存储的数据读取等窄权限，限定到具体的文件和目标包。
@@ -101,7 +103,7 @@ HTTP、用例、存储和后台资源，由 app 装配各模块的实现。业�
 - creative、batchimage：核心、HTTP、PostgreSQL、Redis 和平台适配层使用各自的角色门禁。任务资金引用的 scope 只在 app 注册，所属的存储参与者不开启、也不提交自己的事务。
 - scheduler：核心、HTTP、Redis、PostgreSQL 分别使用角色门禁。评分、排序、会话和等待不接收旧实体、Gin 或存储客户端；需要的 ProviderSnapshot、RoutePlan、singleflight 和散列依赖，由核心角色和模块关系许可。`scheduler/rediscache/codec` 维护 `sched:v5` 的完整提供商和轻量数据。
 - payment、promotion：依赖门禁覆盖新的核心、HTTP、PostgreSQL 和 app。payment 根包不直接依赖 Ent、config 或 Wire；billing 的值、套餐 HTTP 的复用和微信身份的辅助，分别按实际的文件和 import 许可，新文件和迁出的文件不继承许可。
-- 纯规则包：协议哈希和 Gemini 迭代器使用纯角色的 `crypto/sha256` 和 `iter` 许可；clientmeta 的版本库按纯角色许可；app 的定价装配和目录 HTTP 的接口测试，按对应的角色和模块关系检查。pricing、capability、clientmeta 使用明确的标准库集合，不能增加文件或网络读取。
+- 纯规则包：协议哈希、GIF 头解析和 Gemini 迭代器使用纯角色的 `crypto/sha256`、`encoding/binary` 和 `iter` 许可；clientmeta 的版本库按纯角色许可；app 的定价装配和目录 HTTP 的接口测试，按对应的角色和模块关系检查。pricing、capability、clientmeta 使用明确的标准库集合，不能增加文件或网络读取。
 - 传输：传输测试随 `gateway/provider/transport` 运行，旧 repository 测试的许可不会随路径迁移被继承。
 
 ## 编码约定
@@ -280,13 +282,14 @@ Testcontainers 的启动函数可能同时返回已创建的容器和错误。�
 | 任意文件 | `git diff --check` |
 | `backend/**/*.go` | Go 格式、arch-go，改动包的 golangci-lint（`--new-from-rev`，带 integration 标签）和 `go test` |
 | `backend/go.mod`、`backend/go.sum` | 同上，lint 和测试范围扩大到整个模块 |
+| `tools/architecture/` | 重新扫描后端源码，执行架构和文件布局检查，禁用 Go 测试结果缓存 |
 | `frontend/src`、`frontend/public` | 全量前端格式、ESLint、注释、依赖、UI token、类型和检查脚本测试；应用测试使用 `vitest related`，删除源文件时运行完整 Vitest |
 | `frontend` 下的其他文件 | 完整前端静态检查、检查脚本测试和 Vitest；package、锁文件或 workspace 配置改动时先冻结安装 |
 | `backend/internal/pkg/locale/*.json` | 引用这些文件的前端测试 |
 | `deploy/`、`tools/goreleaser*` | `make test-scripts` |
 | `tools/*.py`、`tools/declorder/`、`.githooks/` | `make test-tools` |
 
-快检使用 Go 测试缓存，没有改动的包直接复用上次结果。集成测试、前端生产构建和改动包的下游使用方由 CI 检查。快检失败会阻止推送，修复后重新推送；确需跳过时使用 `git push --no-verify`。手动执行 `make check` 时，基准默认取上游分支的共同祖先，也可以传 `BASE=<提交>`。
+包级单元测试使用 Go 测试缓存，没有改动的包直接复用上次结果。架构测试跨模块读取后端源码，以 `-count=1` 每次重新扫描；架构规则自身变化也会触发这项检查。集成测试、前端生产构建和改动包的下游使用方由 CI 检查。快检失败会阻止推送，修复后重新推送；确需跳过时使用 `git push --no-verify`。手动执行 `make check` 时，基准默认取上游分支的共同祖先，也可以传 `BASE=<提交>`。
 
 ### CI
 
@@ -295,6 +298,7 @@ Testcontainers 的启动函数可能同时返回已创建的容器和错误。�
 | job | 内容 |
 | --- | --- |
 | go-lint | `make lint-go`、`make test-tools`、`make fmt-go-check` |
+| plugin-sdk | 独立 Go SDK 的 lint、测试和 proto 重生成检查，Web SDK 的格式、类型、构建测试及最小 Vue SFC 消费夹具 |
 | go-test | `make test-go` |
 | go-integration | 安装 PostgreSQL 18 客户端，再执行 `make test-integration` |
 | frontend | `make lint-frontend`、`make test-frontend` |
@@ -355,9 +359,15 @@ make test-frontend
 make build
 ```
 
-部署文件变更时执行 `make test-scripts` 和 `make test-installer`。依赖安全检查使用 `make security`，Security Scan workflow 分别调用它的 `security-go` 和 `security-frontend`。govulncheck 版本在 `.govulncheck-version` 固定，漏洞数据在线更新。前端审计的 stderr 原样输出；报告为空、包含错误对象或结构不完整时返回失败，高危漏洞按 `.github/audit-exceptions.yml` 核对例外与有效期。pnpm 按高危等级过滤漏洞明细，汇总仍包含低等级计数；脚本检查高危计数与明细是否一致。
+部署文件变更时执行 `make test-scripts` 和 `make test-installer`。依赖安全检查使用 `make security`，Security Scan workflow 分别调用它的 `security-go` 和 `security-frontend`。
+
+`security-go` 分别在 `backend` 和 `plugin-sdk/go` 运行 govulncheck，按各模块自己的依赖版本检查源码与依赖，覆盖后端未引用的 SDK 包。govulncheck 版本在 `.govulncheck-version` 固定，漏洞数据在线更新。
+
+`security-frontend` 分别按 `frontend` 和 `plugin-sdk/web` 的锁文件执行冻结安装，并审计生产依赖，阻止未获豁免的 high 和 critical 漏洞。主前端审计的 stderr 原样输出；报告为空、包含错误对象或结构不完整时返回失败，高危漏洞按 `.github/audit-exceptions.yml` 核对例外与有效期。pnpm 按高危等级过滤漏洞明细，汇总仍包含低等级计数；脚本检查高危计数与明细是否一致。Web SDK 直接执行 `pnpm audit --prod --audit-level=high`，不套用主前端的例外。Security Scan 的 Go 和 pnpm 缓存键分别包含两个对应模块的依赖锁文件。
 
 Vue 的最低版本为 `3.5.42`，该版本修复了 `@vue/server-renderer` 属性名检查中的 XSS 漏洞。`frontend/pnpm-workspace.yaml` 将低于 `1.2.2` 的 `source-map-js` 依赖提升到修复版本，覆盖 Vue 编译器和 i18n 引入的索引偏移 DoS 漏洞。更新这些依赖时同步维护锁文件，并运行前端测试、生产构建和安全扫描。
+
+Vue I18n 的最低版本为 `11.4.16`，消息编译器 `@intlify/message-compiler` 固定为同一版本。该版本包含 [GHSA-83rm-6c8r-g728](https://github.com/advisories/GHSA-83rm-6c8r-g728) 的 `srcdoc` 转义修复；9.x 和 10.x 已停止维护，没有对应补丁。应用使用 Composition API，Vite 沿用 runtime 分发，11.x 默认启用 JIT，不再设置旧的 `__INTLIFY_JIT_COMPILATION__` 开关。升级时验证真实中英文词条、占位符、HTML 转义、语言切换和生产构建，并确认锁文件不再保留受影响的旧版 `@intlify` 包。
 
 Axios 的 Node 重定向依赖 `follow-redirects` 通过 workspace override 固定低版本的替换值为 `1.16.2`。该版本包含数组形式请求头和特殊字符敏感请求头在跨域重定向时的剥离修复，对应 [GHSA-q3jh-wrc6-jgq8](https://github.com/advisories/GHSA-q3jh-wrc6-jgq8) 和 [GHSA-8r9p-f939-6h3c](https://github.com/advisories/GHSA-8r9p-f939-6h3c)。它还修复了来自另一 JavaScript 运行环境的 `sensitiveHeaders` 数组被丢弃后，自定义凭据可能随跨域重定向发送的问题，见 [GHSA-mrwp-f3q8-3g9p](https://github.com/advisories/GHSA-mrwp-f3q8-3g9p)。安全检查继续使用现有高危例外规则。
 
@@ -369,6 +379,14 @@ DOMPurify 用于 Markdown 页面、公告、支付说明和 SVG 图标的内容�
 ## 提交与文档
 
 提交信息遵循 Conventional Commits，例如 `feat(gateway): ...`、`fix(billing): ...`、`docs(project): ...`。一次提交围绕一个可以验证的目的，生成文件、迁移和接口测试，和它们的源码变更一起提交。
+
+### GitHub Issue 与 PR
+
+人工提交 Issue 使用 [`.github/ISSUE_TEMPLATE/`](../../.github/ISSUE_TEMPLATE/) 中的英文 Bug 或功能请求表单，空白 Issue 入口关闭。普通 PR 使用[英文模板](../../.github/PULL_REQUEST_TEMPLATE.md)。Issue 与 PR 的撰写内容统一使用英文，不使用 emoji；用户原话引用保留原文。新功能先关联 Issue，较大或方向性变更先与维护者达成一致；验证记录需要实际命令或操作与观察结果，UI 变更附截图或录屏，Bug 修复说明复现过程和修复后的表现。
+
+普通模板里的隐藏说明将 Agent 引导到 [Issue 专用模板](../../.agents/github/ISSUE.md)和 [PR 专用模板](../../.agents/github/PR.md)，入口规则同时写在 [AGENTS.md](../../AGENTS.md)。Agent 模板保留工具信息、用户原始请求及后续纠正、调查证据、验证结果和未验证范围；缺少必需事实时，Agent 应先追问，不能猜测后提交。为项目所有者创建 PR 时，默认使用普通英文模板，只有所有者明确要求时才用 Agent 模板。外部贡献者由 Agent 创建 PR 时，需要声明 AI 参与。
+
+受理范围依据[提供商能力矩阵](../interfaces/upstream_provider_matrix.md)和各平台文档。受支持的 Codex、OAuth 或 coding 模式，以及 TokenRouter 自身的转发和错误处理问题，仍按模板受理；仅原样转发的上游报错和第三方服务独有的问题，应先交由对应提供方处理。验证命令按本文的[验证策略](#验证策略)选择，记录实际执行范围。模板的来源、适配记录和许可见[模板说明](../../.github/NOTICE.templates.md)。
 
 ### 前端格式化与静态检查
 
@@ -431,6 +449,6 @@ DOMPurify 用于 Markdown 页面、公告、支付说明和 SVG 图标的内容�
 
 缺少 Secret 时通知步骤输出警告并跳过。发送失败会显示警告，发布结果仍为成功。脚本等待 Discord 返回消息回执；网络超时后由维护者检查频道，确认消息是否送达。重跑已成功的通知会再发送一条消息。GitHub feed 的提交动态使用仓库 push Webhook，发布公告由 Release workflow 发送。
 
-发布之前，确认目标提交已经推送、CI 通过、数据库迁移可以滚动升级，并且备份已经验证。发布之后，检查 Release、镜像、二进制、VERSION 的回写和部署的冒烟测试；tag 只标识代码版本，迁移和恢复的检查仍然要做。
+发布之前，确认目标提交已经推送、CI 通过、数据库迁移符合单实例前后端整体升级流程，并且备份已经验证。发布之后，检查 Release、镜像、二进制、VERSION 的回写和部署的冒烟测试；tag 只标识代码版本，迁移和恢复的检查仍然要做。
 
 相关文档：[项目总览](../project_overview.md)、[系统架构](../architecture/system_architecture.md)、[配置](../interfaces/configuration.md)、[部署与数据库迁移](deployment_and_migrations.md)、[版本升级说明](upgrade_notes.md)、[运维目录](index.md)。

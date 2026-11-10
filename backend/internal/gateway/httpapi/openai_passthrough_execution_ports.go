@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 
 	"github.com/TokenFlux/TokenRouter/internal/apikey"
@@ -38,10 +37,8 @@ import (
 // request reuse a shared budget. That budget is initialized by the sequential
 // request runner and later protected by the upstream retry types. Compact,
 // Agent Identity and field repairs remain distinct recovery decisions.
-// Successful HTTP turn-state provenance is recorded before response reading,
-// and the runner owns each body lifetime across retries and final output.
-// Streaming exchanges keep the downstream connection active while upstream
-// headers are pending, then transfer heartbeat ownership to the body reader.
+// The output sink records turn-state provenance only while response metadata
+// remains applicable. The runner owns each body across retries and final output.
 
 // openAIResponsesRejectedFieldRetryBudgetContextKey identifies the request-wide repair allowance
 // reused by per-provider body-deduplication states during passthrough recovery.
@@ -53,9 +50,6 @@ type openAIPassthroughExecutionAdapter struct {
 	// openAIMessagesExecutionAdapter shares provider, HTTP state and services
 	// with this passthrough call until its synchronous response handling finishes.
 	*openAIMessagesExecutionAdapter
-	// stream follows the prepared passthrough body's stream choice. BuildPass
-	// refreshes it for each exchange before SendPass selects header-wait heartbeats.
-	stream bool // prepared request stream mode
 }
 
 // Profile describes the selected provider and shadow state for passthrough
@@ -350,25 +344,18 @@ func (p *openAIPassthroughExecutionAdapter) UpstreamModelObserved(model string) 
 }
 
 // BuildPass constructs the prepared raw passthrough request with token and TLS
-// matches. It records the prepared body's stream mode for SendPass and uses
-// this attempt's live HTTP state for header and identity policy. Construction
-// errors return before SendPass can open a response.
+// matches. It uses this attempt's live HTTP state for header and identity
+// policy; construction errors return before SendPass can open a response.
 func (p *openAIPassthroughExecutionAdapter) BuildPass(ctx context.Context, body []byte, token string) (*http.Request, error) {
-	p.stream = gjson.GetBytes(body, "stream").Bool()
 	return p.s.Requests.BuildPassthrough(ctx, p.c, p.provider, body, token, p.tls...)
 }
 
 // SendPass clears model observation and sends using prepared proxy, provider
 // concurrency and TLS profile. Callers run PrepareTransportPass first, and the
 // passthrough runner closes each successful response body after reading or
-// retry/error handling. Configured streaming heartbeats end before the returned
-// response reaches header processing or transport-error presentation.
+// retry/error handling.
 func (p *openAIPassthroughExecutionAdapter) SendPass(r *http.Request) (*http.Response, error) {
 	resetResponseModel(p.c)
-	// Upstream headers can arrive after an ingress idle deadline. Keep comments
-	// flowing during this exclusive wait, then stop before the response reader owns output.
-	stop := p.s.Output.StartHeaderKeepalive(p.c, p.stream)
-	defer stop()
 	return p.s.Requests.Transport.DoWithTLS(r, p.proxyURL, p.provider.Record.ID, p.provider.Record.Concurrency, p.s.Requests.TLSProfile(p.provider, p.tls...))
 }
 
@@ -444,14 +431,17 @@ func (p *openAIPassthroughExecutionAdapter) WrapResponseBody(r *http.Response) {
 	}
 }
 
-// ObserveProvenance records this provider as the source of a nonblank
-// turn-state header. RunPassthrough invokes it after a successful HTTP
-// response and before the response reader, so this publication does not wait
-// for confirmed client delivery.
-func (p *openAIPassthroughExecutionAdapter) ObserveProvenance(h http.Header) {
-	if ExtractCodexTurnState(h) != "" {
-		p.s.Requests.Turns.Commit(p.c, p.provider, h)
+// Sink binds passthrough header ownership to actual response metadata application.
+// A heartbeat may already have committed the client response before upstream
+// headers arrive; those undelivered values must not replace the remembered provider.
+func (p *openAIPassthroughExecutionAdapter) Sink() upstream.OutputSink {
+	sink := NewResponseSink(p.c)
+	sink.headersApplied = func(headers http.Header) {
+		if ExtractCodexTurnState(headers) != "" {
+			p.s.Requests.Turns.Commit(p.c, p.provider, headers)
+		}
 	}
+	return sink
 }
 
 // ResponseOptions binds passthrough reading, health and output callbacks to

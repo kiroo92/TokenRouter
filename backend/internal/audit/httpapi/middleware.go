@@ -80,7 +80,7 @@ var (
 		"POST /api/v1/subscriptions/:id/revoke":                   audit.AuditActionUserSubscriptionRevoke,
 	}
 
-	// auditBodyOmittedRoutes lists routes whose bodies contain credentials embedded in strings.
+	// auditBodyOmittedRoutes lists routes with opaque uploads or credentials whose field names are chosen dynamically.
 	// Key-based redaction cannot safely inspect these values, so the entire body is omitted.
 	auditBodyOmittedRoutes = map[string]struct{}{
 		// Support text and private attachment payloads can contain credentials that
@@ -89,6 +89,8 @@ var (
 		"POST /api/v1/tickets/:id/replies":                           {},
 		"POST /api/v1/admin/tickets/:id/replies":                     {},
 		"PUT /api/v1/admin/remote-account-pool/settings":             {},
+		"PUT /api/v1/admin/plugins/:id/config":                       {},
+		"POST /api/v1/admin/plugins/uploads":                         {},
 		"POST /api/v1/admin/mcp/oauth/requests/:id/decision":         {},
 		"POST /api/v1/admin/mcp/files":                               {},
 		"POST /api/v1/auth/passkey/login/finish":                     {},

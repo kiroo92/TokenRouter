@@ -89,7 +89,9 @@ func (b *genericResponsesAttemptBridge) FirstSelectionFailure(err error, _ bool)
 // Acquire adopts the selected provider release or waits for its plan when
 // capacity was not acquired. A missing plan writes a no-provider error and
 // returns false. Successful ownership is wrapped for request cancellation, and
-// later forwarding or cleanup releases it idempotently.
+// later forwarding or cleanup releases it idempotently. Successful acquisition
+// freezes initial HTTP admission timing; retries preserve the first endpoint
+// and record later waiting separately.
 func (b *genericResponsesAttemptBridge) Acquire() bool {
 	var err error
 	// Adopt the scheduler's acquired ownership first; waiting obtains a replacement
@@ -115,6 +117,7 @@ func (b *genericResponsesAttemptBridge) Acquire() bool {
 			return false
 		}
 	}
+	gatewayhttp.MarkOpsProviderSlotAcquired(b.c)
 	// Share provider cleanup between request cancellation and normal forwarding
 	// return, allowing both paths to call the same lease-managed callback safely.
 	b.providerReleaseFunc = scheduler.WrapRelease(b.c.Request.Context(), scheduler.ReleaseOnCancel, b.providerReleaseFunc)
@@ -134,9 +137,9 @@ func (b *genericResponsesAttemptBridge) Acquire() bool {
 // can still use a nonnil partial result after an ordinary execution error.
 func (b *genericResponsesAttemptBridge) Forward(_ textflow.AttemptState) textflow.Outcome {
 	var err error
-	// Compare size around this exchange for the loop's retry decision. Gin's first
-	// header commitment changes -1 to zero even before body bytes are written.
-	b.writerSizeBeforeForward = b.c.Writer.Size()
+	// Compare adjusted size around this exchange for retry decisions. Recorded
+	// heartbeats preserve -1, while headers alone retain Gin's zero-byte state.
+	b.writerSizeBeforeForward = gatewayhttp.HeartbeatAdjustedWrittenSize(b.c)
 	gatewayhttp.SetActualUpstreamEndpoint(b.c, "")
 	if b.provider.Record.Platform == capability.PlatformGemini {
 		// A missing Gemini compatibility executor ends this attempt before an
@@ -180,7 +183,7 @@ func (b *genericResponsesAttemptBridge) Forward(_ textflow.AttemptState) textflo
 		b.binding().reportSchedule(b.selection, b.provider.Record.ID, err == nil, b.result)
 	}
 
-	out := textflow.Outcome{Attempt: messageObservedAttempt(b.result, err), Err: err, HasResult: b.result != nil, OutputChanged: b.c.Writer.Size() != b.writerSizeBeforeForward}
+	out := textflow.Outcome{Attempt: messageObservedAttempt(b.result, err), Err: err, HasResult: b.result != nil, OutputChanged: gatewayhttp.HeartbeatAdjustedWrittenSize(b.c) != b.writerSizeBeforeForward}
 	out.Attempt.HTTPCommitted = b.c.Writer.Written()
 	out.Attempt.RetryCommitted = out.OutputChanged
 	var policy *anthropic.BetaBlockedError

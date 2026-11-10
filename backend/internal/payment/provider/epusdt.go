@@ -2,17 +2,12 @@ package provider
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/url"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -23,20 +18,22 @@ import (
 	"github.com/TokenFlux/TokenRouter/internal/pkg/apperror"
 )
 
-// epusdt.go creates GMPay hosted checkouts and authenticates their payment
-// notifications. The adapter keeps fiat order amounts separate from the token
-// quantity selected by the cashier. Requests use the configured merchant PID
-// and HMAC-SHA256 secret, while queries address the opaque trade identifier
-// returned by successful checkout creation. HTTP requests retain their context,
-// reject redirects, and bound response bodies before interpreting gateway data.
+// epusdt.go creates EPUSDT hosted checkouts through its EPay-compatible
+// submit.php endpoint and verifies MD5-signed form notifications. The service
+// implements a redirect checkout rather than the generic EasyPay API checkout:
+// a successful POST returns a cashier Location containing the gateway trade
+// identifier. The adapter saves that identifier for the existing payment
+// runtime and reads the cashier's JSON endpoints to confirm later observations.
 //
-// Callback signatures cover sorted scalar fields rather than raw JSON. The
-// decoder rejects duplicate keys, unknown fields, nested values, and delimiter
-// ambiguity before reproducing the gateway's numeric spelling. The payment
-// runtime separately checks the signed merchant order against its saved
-// merchant and transaction binding. An uncertain creation response leaves the
-// committed local order available for a later signed notification; requests
-// are never retried automatically because the gateway rejects duplicate orders.
+// Fiat order amounts remain separate from the token quantity selected by the
+// cashier. Every successful callback must agree with the configured merchant,
+// its signature, and a paid cashier observation before fulfillment checks the
+// saved local order. Redirects are inspected without following them, responses
+// are bounded, and ambiguous creation failures retain the local order because
+// the gateway may already have accepted the signed form. Recognized rejections
+// before gateway creation release the local order through checkout failure
+// handling. Product names are normalized for signing without changing the
+// original title retained in the local order snapshot.
 
 // EPUSDT transport bounds limit one provider operation and its decoded response;
 // gateway statuses distinguish waiting, paid, expired, and asset-selection orders.
@@ -47,6 +44,17 @@ const (
 	epusdtPaid        = 2                // gateway confirmed payment
 	epusdtExpired     = 3                // gateway expired order
 	epusdtSelecting   = 4                // awaiting cashier asset selection
+
+	// EPay business codes below reject creation before an order is persisted.
+	// Duplicate-order and system errors remain uncertain because payment may exist.
+	epusdtNoWallet         = 10003 // no available receiving wallet
+	epusdtInvalidAmount    = 10004 // rejected fiat or token amount
+	epusdtNoAmountChannel  = 10005 // no available transfer amount
+	epusdtInvalidRate      = 10006 // unavailable currency conversion rate
+	epusdtInvalidParams    = 10009 // malformed checkout request parameters
+	epusdtChainDisabled    = 10014 // selected payment chain disabled
+	epusdtUnsupportedAsset = 10016 // selected payment asset unavailable
+	epusdtInvalidNotifyURL = 10041 // rejected merchant callback URL
 )
 
 // Adapter assertions keep checkout and merchant identity capabilities checked
@@ -56,28 +64,25 @@ var (
 	_ payment.MerchantIdentityProvider = (*EPUSDT)(nil)
 )
 
-// EPUSDT implements GMPay checkout and verification for one configured merchant.
+// EPUSDT implements EPay checkout and verification for one configured merchant.
 type EPUSDT struct {
 	baseURL    string       // validated HTTPS service prefix
 	pid        string       // configured merchant PID
-	secret     string       // merchant HMAC signing secret
+	secret     string       // merchant EPay signing secret
 	currency   string       // fiat order currency
 	notifyURL  string       // configured callback destination
 	httpClient *http.Client // shared bounded transport client
 }
 
-// epusdtReply decodes the gateway envelope and common checkout observation fields.
+// epusdtReply decodes the gateway envelope and cashier observation fields.
 type epusdtReply struct {
 	Code int `json:"status_code"` // gateway business response code
 	Data struct {
-		TradeID    string      `json:"trade_id"`        // gateway parent trade identifier
-		OrderID    string      `json:"order_id"`        // creation merchant order identifier
-		Amount     json.Number `json:"amount"`          // fiat order amount
-		Currency   string      `json:"currency"`        // fiat currency reported by gateway
-		Status     int         `json:"status"`          // gateway payment state
-		PaymentURL string      `json:"payment_url"`     // hosted cashier launch URL
-		Expiration int64       `json:"expiration_time"` // creation expiration Unix seconds
-	} `json:"data"` // creation or query payload
+		TradeID  string      `json:"trade_id"` // gateway parent trade identifier
+		Amount   json.Number `json:"amount"`   // fiat order amount
+		Currency string      `json:"currency"` // fiat currency reported by gateway
+		Status   int         `json:"status"`   // gateway payment state
+	} `json:"data"` // cashier query payload
 }
 
 // NewEPUSDT constructs a merchant adapter with a bounded HTTPS client.
@@ -100,7 +105,7 @@ func NewEPUSDT(_ string, config map[string]string) (*EPUSDT, error) {
 		return nil, fmt.Errorf("epusdt notifyUrl must be an absolute HTTPS URL")
 	}
 	pid := strings.TrimSpace(config["pid"])
-	if !epusdtSafeValue(pid) || strings.TrimSpace(config["secretKey"]) == "" {
+	if pid == "" || !easyPaySafeNotifyValue(pid) || strings.TrimSpace(config["secretKey"]) == "" {
 		return nil, fmt.Errorf("epusdt merchant PID and secret are required")
 	}
 	return &EPUSDT{
@@ -119,9 +124,9 @@ func NewEPUSDT(_ string, config map[string]string) (*EPUSDT, error) {
 }
 
 // Name returns the payment adapter's administrator-facing product display name.
-func (e *EPUSDT) Name() string { return "EPUSDT / GMPay" }
+func (e *EPUSDT) Name() string { return "EPUSDT (EPay protocol)" }
 
-// ProviderKey returns the persisted identity used for GMPay provider dispatch.
+// ProviderKey returns the persisted identity used for EPUSDT provider dispatch.
 func (e *EPUSDT) ProviderKey() string { return payment.TypeEPUSDT }
 
 // SupportedTypes returns a fresh collection containing the cryptocurrency checkout method.
@@ -134,61 +139,138 @@ func (e *EPUSDT) MerchantIdentityMetadata() map[string]string {
 	return map[string]string{"pid": e.pid, "currency": e.currency}
 }
 
-// CreatePayment signs one hosted checkout request using the stored merchant number.
-// Token and network are omitted together so the cashier selects the payment
-// asset. Ambiguous transport or response failures return PAYMENT_CREATE_UNCONFIRMED,
-// allowing the caller to retain its committed order for callback recovery.
-// Returned merchant identity, fiat amount, currency, and cashier origin must
-// match this request before its reference is accepted. The returned deadline
-// comes from the gateway, which controls the cashier payment window.
+// CreatePayment posts one MD5-signed EPay form to the redirect checkout.
+// The alipay compatibility type leaves asset selection to the cashier defaults.
+// A same-origin cashier redirect supplies the gateway reference. Transport or
+// unrecognized response failures retain the pending order for signed callback
+// recovery because repeating creation could submit the same purchase twice.
+// EPay does not return an expiry timestamp, so the local order keeps its deadline.
+//
+// Recognized gateway rejections return ordinary errors for checkout failure
+// handling. The signed product name replaces delimiters and control characters;
+// the caller's original display text remains unchanged.
 func (e *EPUSDT) CreatePayment(ctx context.Context, req payment.CreatePaymentRequest) (*payment.CreatePaymentResponse, error) {
-	amount, err := strconv.ParseFloat(req.Amount, 64)
-	if err != nil || math.IsNaN(amount) || math.IsInf(amount, 0) || amount <= 0.01 ||
-		!epusdtSafeValue(req.OrderID) || len(req.OrderID) > 32 {
-		return nil, fmt.Errorf("epusdt checkout order or amount is invalid")
+	if _, err := easyPayPositiveMoney(req.Amount); err != nil ||
+		!easyPaySafeNotifyValue(req.OrderID) || req.OrderID == "" || len(req.OrderID) > 32 {
+		return nil, fmt.Errorf("epusdt EPay checkout order or amount is invalid")
 	}
 	notifyURL := req.NotifyURL
 	if notifyURL == "" {
 		notifyURL = e.notifyURL
 	}
 	params := map[string]string{
-		"pid": e.pid, "order_id": req.OrderID, "amount": req.Amount,
-		"currency": strings.ToLower(e.currency), "notify_url": notifyURL,
-		"redirect_url": req.ReturnURL, "name": req.Subject,
+		"pid": e.pid, "type": "alipay", "out_trade_no": req.OrderID,
+		"money": req.Amount, "currency": strings.ToLower(e.currency),
+		"notify_url": notifyURL, "return_url": req.ReturnURL, "name": epusdtPaymentSubject(req.Subject),
 	}
-	params["signature"] = epusdtSignature(params, e.secret)
+	params["sign"] = easyPaySign(params, e.secret)
+	params["sign_type"] = signTypeMD5
 	form := url.Values{}
 	for key, value := range params {
 		form.Set(key, value)
 	}
-	reply, status, err := e.request(ctx, http.MethodPost, "/payments/gmpay/v1/order/create-transaction", form.Encode())
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		e.baseURL+"/payments/epay/v1/order/create-transaction/submit.php", strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, apperror.ServiceUnavailable(payment.CodePaymentCreateUnconfirmed, "payment creation could not be confirmed")
+		return nil, fmt.Errorf("epusdt EPay request could not be constructed")
 	}
-	if reply.Code != http.StatusOK {
-		if status >= 400 && status < 500 && reply.Code >= 10000 {
-			return nil, fmt.Errorf("epusdt rejected checkout (code %d)", reply.Code)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := e.httpClient.Do(request)
+	if err != nil {
+		// The signed form may already have created a cashier. Preserve its local
+		// order and suppress transport text that can include merchant request data.
+		return nil, apperror.ServiceUnavailable(payment.CodePaymentCreateUnconfirmed, "EPUSDT EPay creation could not be confirmed")
+	}
+	// Release the redirect body without reading or following the cashier page,
+	// keeping checkout creation separate from browser navigation and payment selection.
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusFound && response.StatusCode != http.StatusSeeOther {
+		if epusdtCreateRejected(response) {
+			return nil, fmt.Errorf("epusdt EPay checkout was rejected (HTTP %d)", response.StatusCode)
 		}
-		return nil, apperror.ServiceUnavailable(payment.CodePaymentCreateUnconfirmed, "payment creation could not be confirmed")
+		return nil, apperror.ServiceUnavailable(payment.CodePaymentCreateUnconfirmed, "EPUSDT EPay cashier redirect was not returned")
 	}
-	paymentURL, parseErr := url.Parse(reply.Data.PaymentURL)
-	baseURL, _ := url.Parse(e.baseURL)
-	if parseErr != nil || paymentURL.Scheme != "https" || paymentURL.Host != baseURL.Host ||
-		paymentURL.User != nil || !epusdtTradeReference(reply.Data.TradeID) ||
-		reply.Data.OrderID != req.OrderID || !strings.EqualFold(reply.Data.Currency, e.currency) ||
-		!epusdtEqualAmount(reply.Data.Amount.String(), req.Amount) ||
-		(reply.Data.Status != epusdtWaiting && reply.Data.Status != epusdtSelecting) ||
-		reply.Data.Expiration <= time.Now().Unix() {
-		return nil, apperror.ServiceUnavailable(payment.CodePaymentCreateUnconfirmed, "payment creation response could not be validated")
+	location, err := response.Location()
+	base, _ := url.Parse(e.baseURL)
+	if err != nil || location.Scheme != "https" || location.Host != base.Host ||
+		location.User != nil || location.RawQuery != "" || location.Fragment != "" {
+		return nil, apperror.ServiceUnavailable(payment.CodePaymentCreateUnconfirmed, "EPUSDT EPay cashier destination is invalid")
 	}
-	// The gateway owns its payment deadline and returns creation timestamps in
-	// seconds; persist that deadline so the local waiting screen follows its cashier.
+	prefix := strings.TrimRight(base.Path, "/") + "/pay/checkout-counter/"
+	tradeID := strings.TrimPrefix(location.Path, prefix)
+	if !strings.HasPrefix(location.Path, prefix) || !epusdtTradeReference(tradeID) {
+		return nil, apperror.ServiceUnavailable(payment.CodePaymentCreateUnconfirmed, "EPUSDT EPay cashier reference is invalid")
+	}
 	return &payment.CreatePaymentResponse{
-		TradeNo:   reply.Data.TradeID,
-		PayURL:    paymentURL.String(),
-		Currency:  e.currency,
-		ExpiresAt: time.Unix(reply.Data.Expiration, 0),
+		TradeNo:  tradeID,
+		PayURL:   location.String(),
+		Currency: e.currency,
 	}, nil
+}
+
+// epusdtPaymentSubject prepares product text for unambiguous EPay signing.
+// Full-width ampersands and equals signs preserve readable punctuation, while
+// control characters become spaces and outer whitespace is removed. The
+// returned description is used only for the gateway request and its callbacks.
+func epusdtPaymentSubject(subject string) string {
+	return strings.TrimSpace(strings.Map(func(ch rune) rune {
+		// Callback verification rejects signing delimiters and controls in every
+		// field, so normalize product text before the gateway stores and signs it.
+		switch ch {
+		case '&':
+			return '＆'
+		case '=':
+			return '＝'
+		default:
+			if unicode.IsControl(ch) {
+				return ' '
+			}
+			return ch
+		}
+	}, subject))
+}
+
+// epusdtCreateRejected recognizes gateway responses proving checkout was refused.
+// It consumes a bounded error body only for HTTP 400 or 401 and requires the
+// corresponding EPay error code with no order data. The caller closes the body.
+//
+// Only authentication and validation failures known to precede order creation
+// qualify. Duplicate orders, system errors, malformed replies, and transport
+// failures cannot establish that payment is absent, so they preserve the
+// uncertain local order instead of releasing its merchant binding.
+func epusdtCreateRejected(response *http.Response) bool {
+	if response.StatusCode != http.StatusBadRequest && response.StatusCode != http.StatusUnauthorized {
+		return false
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, epusdtMaxBody+1))
+	// An incomplete or oversized error envelope cannot prove rejection. Keep
+	// checkout uncertain so a truncated response cannot discard a payable order.
+	if err != nil || len(data) > epusdtMaxBody {
+		return false
+	}
+	var reply struct {
+		Code int             `json:"status_code"` // gateway rejection reason code
+		Data json.RawMessage `json:"data"`        // absent or null order data
+	}
+	// Only complete error envelopes without order data establish rejection;
+	// conflicting or malformed replies retain the local order for later recovery.
+	if json.Unmarshal(data, &reply) != nil {
+		return false
+	}
+	if payload := strings.TrimSpace(string(reply.Data)); payload != "" && payload != "null" {
+		return false
+	}
+	if response.StatusCode == http.StatusUnauthorized {
+		return reply.Code == http.StatusUnauthorized
+	}
+	switch reply.Code {
+	case epusdtNoWallet, epusdtInvalidAmount, epusdtNoAmountChannel,
+		epusdtInvalidRate, epusdtInvalidParams, epusdtChainDisabled,
+		epusdtUnsupportedAsset, epusdtInvalidNotifyURL:
+		return true
+	default:
+		return false
+	}
 }
 
 // QueryOrder observes the saved opaque gateway trade identifier over HTTPS.
@@ -201,12 +283,12 @@ func (e *EPUSDT) QueryOrder(ctx context.Context, tradeNo string) (*payment.Query
 	if !epusdtTradeReference(tradeNo) {
 		return nil, fmt.Errorf("epusdt gateway trade reference is unavailable")
 	}
-	details, _, err := e.request(ctx, http.MethodGet, "/pay/checkout-counter-resp/"+url.PathEscape(tradeNo), "")
+	details, err := e.query(ctx, "/pay/checkout-counter-resp/"+url.PathEscape(tradeNo))
 	if err != nil || details.Code != http.StatusOK || details.Data.TradeID != tradeNo ||
 		!strings.EqualFold(details.Data.Currency, e.currency) {
 		return nil, fmt.Errorf("epusdt order details could not be confirmed")
 	}
-	current, _, err := e.request(ctx, http.MethodGet, "/pay/check-status/"+url.PathEscape(tradeNo), "")
+	current, err := e.query(ctx, "/pay/check-status/"+url.PathEscape(tradeNo))
 	if err != nil || current.Code != http.StatusOK || current.Data.TradeID != tradeNo {
 		return nil, fmt.Errorf("epusdt payment status could not be confirmed")
 	}
@@ -232,170 +314,112 @@ func (e *EPUSDT) QueryOrder(ctx context.Context, tradeNo string) (*payment.Query
 	}, nil
 }
 
-// VerifyNotification authenticates GMPay scalar JSON before interpreting payment success.
-// The signed amount is fiat money; actual_amount is a token quantity and
-// never determines credited balance. Merchant currency comes from protected instance
-// configuration because GMPay callbacks do not include a signed currency field.
+// VerifyNotification authenticates an EPay form and confirms its paid cashier.
+// The signed money field is the fiat order amount. The merchant, compatibility
+// type, trade reference, and queried amount must agree before the payment
+// runtime associates this notification with its saved order snapshot.
+// A valid signature alone cannot confirm success: its amount must also match
+// the independently retrieved fiat amount, and the queried trade must have
+// reached the gateway's paid state before any local entitlement can be granted.
 // @project-doc docs/domains/payments_and_entitlements.md#epusdt_payments
-func (e *EPUSDT) VerifyNotification(_ context.Context, rawBody string, _ map[string]string) (*payment.PaymentNotification, error) {
+func (e *EPUSDT) VerifyNotification(ctx context.Context, rawBody string, _ map[string]string) (*payment.PaymentNotification, error) {
 	params, err := epusdtNotificationParams(rawBody)
 	if err != nil {
 		return nil, err
 	}
-	expected := epusdtSignature(params, e.secret)
-	if !hmac.Equal([]byte(expected), []byte(params["signature"])) || params["pid"] != e.pid {
-		return nil, fmt.Errorf("epusdt notification signature is invalid")
+	if params["pid"] != e.pid || !easyPayVerifySign(params, e.secret, params["sign"]) {
+		return nil, fmt.Errorf("epusdt EPay notification signature is invalid")
 	}
-	amount, err := strconv.ParseFloat(params["amount"], 64)
-	if err != nil || amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) ||
-		params["status"] != "2" || !epusdtSafeValue(params["order_id"]) || !epusdtTradeReference(params["trade_id"]) {
-		return nil, fmt.Errorf("epusdt notification payment fields are invalid")
+	amount, err := easyPayPositiveMoney(params["money"])
+	if err != nil || params["trade_status"] != tradeStatusSuccess || params["type"] != "alipay" ||
+		!epusdtTradeReference(params["trade_no"]) {
+		return nil, fmt.Errorf("epusdt EPay notification payment fields are invalid")
 	}
+	queried, err := e.QueryOrder(ctx, params["trade_no"])
+	if err != nil || queried.Status != payment.ProviderStatusSuccess ||
+		!amount.Equal(decimal.NewFromFloat(queried.Amount)) {
+		return nil, fmt.Errorf("epusdt EPay notification does not match a paid cashier order")
+	}
+	paid, _ := amount.Float64()
 	return &payment.PaymentNotification{
-		OrderID:  params["order_id"],
-		TradeNo:  params["trade_id"],
-		Amount:   amount,
-		Status:   payment.ProviderStatusSuccess,
-		RawData:  rawBody,
+		OrderID: params["out_trade_no"], TradeNo: params["trade_no"], Amount: paid,
+		Status: payment.ProviderStatusSuccess, RawData: rawBody,
 		Metadata: e.MerchantIdentityMetadata(),
 	}, nil
 }
 
-// Refund rejects automatic transfers because GMPay exposes no merchant refund operation.
+// Refund rejects automatic transfers because this EPay integration exposes no
+// merchant refund operation. Administrators reconcile external refunds separately;
+// configuration prevents enabling automatic or buyer-initiated refunds for EPUSDT.
 func (e *EPUSDT) Refund(_ context.Context, _ payment.RefundRequest) (*payment.RefundResponse, error) {
 	return nil, fmt.Errorf("epusdt automatic refunds are not supported")
 }
 
-// request performs one gateway operation and decodes a bounded JSON envelope.
-// Requests never follow redirects. Transport errors discard their original URL-bearing
-// text because a signed creation form and merchant details must not appear
-// in higher-level diagnostics; callers classify creation uncertainty separately.
-func (e *EPUSDT) request(ctx context.Context, method, path, body string) (*epusdtReply, int, error) {
-	req, err := http.NewRequestWithContext(ctx, method, e.baseURL+path, strings.NewReader(body))
+// query reads one cashier observation through the shared bounded HTTPS client.
+// Redirects and non-success HTTP status codes are rejected before JSON parsing.
+// Transport diagnostics omit the opaque payment reference carried by the URL.
+func (e *EPUSDT) query(ctx context.Context, path string) (*epusdtReply, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, e.baseURL+path, nil)
 	if err != nil {
-		return nil, 0, fmt.Errorf("epusdt request could not be constructed")
+		return nil, fmt.Errorf("epusdt query could not be constructed")
 	}
-	if method == http.MethodPost {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	}
-	response, err := e.httpClient.Do(req)
+	response, err := e.httpClient.Do(request)
 	if err != nil {
-		// Request errors can contain signed destinations and credentials. Return a
-		// fixed diagnostic while the caller retains the local order for reconciliation.
-		return nil, 0, fmt.Errorf("epusdt request could not be completed")
+		// Query URLs identify a private cashier. Keep transport details out of
+		// caller-visible errors while leaving its payment state unresolved for recovery.
+		return nil, fmt.Errorf("epusdt query could not be completed")
 	}
-	// Closing releases the response body on every parsing path. Close errors do
-	// not replace the transport, body-read, or decoding result returned to callers.
+	// Release the response on every status and parsing path. A close failure
+	// cannot establish payment and does not replace the observed query result.
 	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("epusdt query HTTP status is not successful")
+	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, epusdtMaxBody+1))
-	if err != nil || len(data) > epusdtMaxBody || response.StatusCode >= 500 ||
-		response.StatusCode < 200 || response.StatusCode >= 300 && response.StatusCode < 400 {
-		return nil, response.StatusCode, fmt.Errorf("epusdt response could not be read")
+	if err != nil || len(data) > epusdtMaxBody {
+		return nil, fmt.Errorf("epusdt query response could not be read")
 	}
 	var reply epusdtReply
 	if err := json.Unmarshal(data, &reply); err != nil {
-		return nil, response.StatusCode, fmt.Errorf("epusdt response is not valid JSON")
+		return nil, fmt.Errorf("epusdt query response is not valid JSON")
 	}
-	if response.StatusCode != http.StatusOK && reply.Code == http.StatusOK {
-		return nil, response.StatusCode, fmt.Errorf("epusdt HTTP status conflicts with its response")
-	}
-	return &reply, response.StatusCode, nil
+	return &reply, nil
 }
 
-// epusdtSignature reproduces GMPay's sorted, nonempty scalar HMAC-SHA256 input.
-// Callers canonicalize JSON numeric values before invoking this helper; form
-// requests retain their exact transmitted scalar spelling during signing.
-func epusdtSignature(params map[string]string, secret string) string {
-	keys := make([]string, 0, len(params))
-	for key, value := range params {
-		if key != "signature" && value != "" {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, key := range keys {
-		parts = append(parts, key+"="+params[key])
-	}
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(strings.Join(parts, "&")))
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-// epusdtNotificationParams decodes an unambiguous scalar notification signature input.
-// Numbers use the gateway's float64 fixed-format spelling and strings retain
-// their received text. Required identities and paid status are checked by the
-// caller after authentication; malformed fields return before signature comparison.
+// epusdtNotificationParams parses EPay callback fields without ambiguous values.
+// Required fields have one nonempty value; optional fields use the same checks.
+// The signature joins decoded values with delimiters, so even the product name
+// rejects delimiter and control characters before any authenticated field is used.
 //
-// Reading object tokens before assigning values detects duplicate JSON keys
-// that ordinary map unmarshalling would overwrite. Unknown names and delimiter-bearing
-// strings are rejected because the signing protocol joins unescaped key-value
-// pairs; accepting arbitrary field content would allow distinct JSON objects
-// to describe the same canonical string. Both representation checks protect
-// the identity consumed later by the payment runtime.
+// These checks precede signature verification, including optional fields and
+// names. Otherwise distinct decoded forms could share the same concatenated
+// signing text and associate a valid signature with different payment fields.
 func epusdtNotificationParams(raw string) (map[string]string, error) {
-	allowed := map[string]bool{
-		"pid": true, "trade_id": true, "order_id": true, "receive_address": true,
-		"token": true, "block_transaction_id": true, "signature": true,
-		"amount": true, "actual_amount": true, "status": true,
+	values, err := url.ParseQuery(raw)
+	if err != nil {
+		return nil, fmt.Errorf("epusdt EPay notification is not a valid form")
 	}
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.UseNumber()
-	opening, err := decoder.Token()
-	if err != nil || opening != json.Delim('{') {
-		return nil, fmt.Errorf("epusdt notification must be a JSON object")
+	params := make(map[string]string, len(values))
+	for key, entries := range values {
+		switch key {
+		case "pid", "trade_no", "out_trade_no", "type", "name", "money", "trade_status", "param", "sign", "sign_type":
+		default:
+			return nil, fmt.Errorf("epusdt EPay notification field is unsupported")
+		}
+		if len(entries) != 1 || !easyPaySafeNotifyValue(entries[0]) {
+			return nil, fmt.Errorf("epusdt EPay notification field is ambiguous")
+		}
+		params[key] = entries[0]
 	}
-	params := make(map[string]string)
-	for decoder.More() {
-		keyToken, err := decoder.Token()
-		key, valid := keyToken.(string)
-		if err != nil || !valid || !allowed[key] {
-			return nil, fmt.Errorf("epusdt notification field is unsupported")
+	for _, key := range []string{"pid", "trade_no", "out_trade_no", "type", "money", "trade_status", "sign"} {
+		if params[key] == "" {
+			return nil, fmt.Errorf("epusdt EPay notification required field is missing")
 		}
-		if _, exists := params[key]; exists {
-			return nil, fmt.Errorf("epusdt notification field is duplicated")
-		}
-		var value any
-		if err := decoder.Decode(&value); err != nil {
-			return nil, fmt.Errorf("epusdt notification field is invalid")
-		}
-		numeric := key == "amount" || key == "actual_amount" || key == "status"
-		if number, ok := value.(json.Number); ok && numeric {
-			parsed, err := number.Float64()
-			if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
-				return nil, fmt.Errorf("epusdt notification number is invalid")
-			}
-			// GMPay signs decoded float64 values using fixed notation without trailing
-			// zeros, so numeric JSON spelling alone cannot be used as signature input.
-			params[key] = strconv.FormatFloat(parsed, 'f', -1, 64)
-			continue
-		}
-		text, ok := value.(string)
-		if !ok || numeric || text != "" && !epusdtSafeValue(text) {
-			return nil, fmt.Errorf("epusdt notification scalar is invalid")
-		}
-		params[key] = text
 	}
-	if _, err := decoder.Token(); err != nil {
-		return nil, fmt.Errorf("epusdt notification object is incomplete")
-	}
-	if _, err := decoder.Token(); err != io.EOF {
-		return nil, fmt.Errorf("epusdt notification has trailing content")
+	if params["sign_type"] != "" && !strings.EqualFold(params["sign_type"], signTypeMD5) {
+		return nil, fmt.Errorf("epusdt EPay notification signing algorithm is unsupported")
 	}
 	return params, nil
-}
-
-// epusdtSafeValue rejects empty, ambiguous, or control-bearing protocol field text.
-func epusdtSafeValue(value string) bool {
-	return value != "" && strings.TrimSpace(value) == value &&
-		!strings.ContainsAny(value, "&=") && !strings.ContainsFunc(value, unicode.IsControl)
-}
-
-// epusdtEqualAmount compares decimal fiat values without a token conversion or tolerance.
-func epusdtEqualAmount(left, right string) bool {
-	a, errA := decimal.NewFromString(left)
-	b, errB := decimal.NewFromString(right)
-	return errA == nil && errB == nil && a.Equal(b)
 }
 
 // epusdtTradeReference validates one opaque gateway identifier before constructing query paths.

@@ -17,7 +17,7 @@ import (
 // repeatable balance or subscription delivery.
 // Verified provider progress can arrive repeatedly or after a local pending
 // order was closed. Notification handling first resolves merchant identity and
-// checks saved provider metadata and EasyPay/GMPay transaction identity, then
+// checks saved provider metadata and EasyPay/EPUSDT EPay transaction identity, then
 // conditionally records payment state and resumes entitlement work. Only Stripe failure
 // notifications select the terminal payment-failure transition; other failure
 // callbacks are ignored before lookup.
@@ -181,7 +181,7 @@ func ParseLegacyPaymentOrderID(orderID string, notFound bool) (int64, bool) {
 // ordinary audit before returning. Snapshot metadata validation separately has
 // its own absent/unrecognized-key rules and is not implied by a successful key
 // comparison. The caller retains signature verification ownership before this
-// order association stage. EasyPay and GMPay observations must retain a saved
+// order association stage. EasyPay and EPUSDT EPay observations must retain a saved
 // transaction number so another external payment cannot replace that binding.
 func (s *Fulfillment) ValidatePaymentNotificationOrder(ctx context.Context, o *Order, pk, tradeNo string, metadata map[string]string) error {
 	if err := validatePaymentTradeNumber(o, pk, tradeNo); err != nil {
@@ -213,7 +213,7 @@ func (s *Fulfillment) ValidatePaymentNotificationOrder(ctx context.Context, o *O
 	return nil
 }
 
-// validatePaymentTradeNumber checks EasyPay and GMPay observations against a
+// validatePaymentTradeNumber checks EasyPay and EPUSDT EPay observations against a
 // previously stored nonempty reference. Other adapters retain their own
 // reference rules, including Stripe's session, invoice and intent transitions.
 func validatePaymentTradeNumber(order *Order, providerKey, tradeNo string) error {
@@ -511,18 +511,12 @@ func (s *Fulfillment) ExecuteFulfillment(ctx context.Context, oid int64) error {
 // returned unchanged. This executor does not itself require PaidAt, unlike
 // administrator RetryFulfillment.
 func (s *Fulfillment) ExecuteBalanceFulfillment(ctx context.Context, oid int64) error {
-	o, err := s.store.Order(ctx, oid)
+	o, err := s.loadFulfillableOrder(ctx, oid)
 	if err != nil {
-		return infraerrors.NotFound("NOT_FOUND", "order not found")
+		return err
 	}
-	if o.Status == OrderStatusCompleted {
+	if o == nil {
 		return nil
-	}
-	if IsRefundStatus(o.Status) {
-		return infraerrors.BadRequest("INVALID_STATUS", "refund-related order cannot fulfill")
-	}
-	if o.Status != OrderStatusPaid && o.Status != OrderStatusFailed && o.Status != OrderStatusRecharging {
-		return infraerrors.BadRequest("INVALID_STATUS", "order cannot fulfill in status "+o.Status)
 	}
 	lease, err := s.AcquirePaymentFulfillmentLease(ctx, o)
 	if err != nil {
@@ -829,18 +823,12 @@ func (s *Fulfillment) SendSubscriptionPurchaseSuccessNotification(ctx context.Co
 // retains the original error. This executor does not independently require
 // PaidAt, while administrator retry has that additional eligibility predicate.
 func (s *Fulfillment) ExecuteSubscriptionFulfillment(ctx context.Context, oid int64) error {
-	o, err := s.store.Order(ctx, oid)
+	o, err := s.loadFulfillableOrder(ctx, oid)
 	if err != nil {
-		return infraerrors.NotFound("NOT_FOUND", "order not found")
+		return err
 	}
-	if o.Status == OrderStatusCompleted {
+	if o == nil {
 		return nil
-	}
-	if IsRefundStatus(o.Status) {
-		return infraerrors.BadRequest("INVALID_STATUS", "refund-related order cannot fulfill")
-	}
-	if o.Status != OrderStatusPaid && o.Status != OrderStatusFailed && o.Status != OrderStatusRecharging {
-		return infraerrors.BadRequest("INVALID_STATUS", "order cannot fulfill in status "+o.Status)
 	}
 	if o.PlanID == nil || *o.PlanID <= 0 {
 		return infraerrors.BadRequest("INVALID_STATUS", "missing subscription info")
@@ -857,6 +845,31 @@ func (s *Fulfillment) ExecuteSubscriptionFulfillment(ctx context.Context, oid in
 		return err
 	}
 	return nil
+}
+
+// loadFulfillableOrder reads the order and admits paid, failed, or recharging
+// state for either fulfillment entry. A nil order with no error means completed
+// work; callers return without claiming a lease. Any read error becomes NOT_FOUND,
+// and refund or other unaccepted states return INVALID_STATUS. Subscription
+// fulfillment validates its plan after this shared status check.
+func (s *Fulfillment) loadFulfillableOrder(ctx context.Context, oid int64) (*Order, error) {
+	o, err := s.store.Order(ctx, oid)
+	if err != nil {
+		// Preserve the fulfillment entries' missing-order response for every read
+		// failure, including storage outages; callers do not expose the underlying
+		// lookup error.
+		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
+	}
+	if o.Status == OrderStatusCompleted {
+		return nil, nil
+	}
+	if IsRefundStatus(o.Status) {
+		return nil, infraerrors.BadRequest("INVALID_STATUS", "refund-related order cannot fulfill")
+	}
+	if o.Status != OrderStatusPaid && o.Status != OrderStatusFailed && o.Status != OrderStatusRecharging {
+		return nil, infraerrors.BadRequest("INVALID_STATUS", "order cannot fulfill in status "+o.Status)
+	}
+	return o, nil
 }
 
 // DoSub resumes the nonnil order's positive-plan subscription, then order

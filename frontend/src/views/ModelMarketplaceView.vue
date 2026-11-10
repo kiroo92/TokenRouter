@@ -59,10 +59,7 @@
             <div
               class="hidden items-center gap-5 text-sm font-medium text-gray-600 dark:text-dark-300 md:flex"
             >
-              <router-link
-                to="/models"
-                class="transition hover:text-gray-950 dark:hover:text-white"
-              >
+              <router-link to="/models" class="text-link">
                 {{ t('home.nav.models') }}
               </router-link>
               <a
@@ -70,7 +67,7 @@
                 :href="docUrl"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="transition hover:text-gray-950 dark:hover:text-white"
+                class="text-link"
               >
                 {{ t('home.docs') }}
               </a>
@@ -206,6 +203,14 @@
                       {{ group.description }}
                     </p>
                     <div class="mt-3 flex flex-wrap items-center gap-2">
+                      <span
+                        v-if="group.is_exclusive"
+                        data-testid="group-exclusive-tag"
+                        class="marketplace-exclusive-tag inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold"
+                      >
+                        <Icon name="crown" size="sm" :animate-on-hover="false" />
+                        {{ t('marketplace.exclusive') }}
+                      </span>
                       <span :class="brandBadgeClass(group)">
                         <ProviderIcon :brand="groupBrandSource(group)" size="14px" />
                         {{ groupBrandLabel(group) }}
@@ -374,7 +379,7 @@ import { vContentReveal } from '@/directives/contentReveal'
 import { useRoute as useMotionRoute } from 'vue-router'
 const motionRoute = useMotionRoute()
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -395,7 +400,7 @@ import Collapse from '@/components/common/Collapse.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import { useBalanceDisplay } from '@/composables/useBalanceDisplay'
 import { initTheme, useTheme } from '@/composables/useTheme'
-import { getMarketplaceModels } from '@/api/marketplace'
+import { getAvailableMarketplaceModels, getMarketplaceModels } from '@/api/marketplace'
 import {
   providerBrandDisplayName,
   providerBrandFilterKey,
@@ -413,7 +418,7 @@ import type {
 
 import { useAppStore, useAuthStore } from '@/stores'
 
-// ModelMarketplaceView.vue displays public model groups with searchable pricing
+// ModelMarketplaceView.vue displays authorized model groups with searchable pricing
 // and capability details. Authenticated visitors use the application layout,
 // while guests receive the public page. Model tooltips combine attributes and
 // protocols, with route differences shown after both sections. Video summaries
@@ -428,6 +433,14 @@ import { useAppStore, useAuthStore } from '@/stores'
 // group IDs. Filtering searches each
 // complete model directory, including models outside the current page. Paging
 // returns to that group's disclosure entry below the fixed application header.
+// Compact summaries distinguish token context intervals, image resolutions, and
+// named video prices using the server's group-scaled quote. Initialization restores
+// theme and account state, awaits missing public settings, then loads the catalog.
+// Locale and account changes request another catalog load. Request generations
+// and captured account identity reject stale responses, including errors and
+// loading completion. Account changes clear the previous catalog synchronously,
+// and unmounting invalidates outstanding requests. Exclusive groups appear first
+// with an inline exclusive tag; all filters operate on that same authorized response.
 
 // MODEL_PAGE_SIZE bounds rendering to twelve cards in each expanded group,
 // keeping large directories responsive when visitors first open their models.
@@ -468,7 +481,16 @@ const groupExpansion = ref(new Map<number, boolean>())
 // so a new result set starts with its first matching models.
 const groupPages = ref<Record<number, number>>({})
 
+// Request lifecycle state belongs to this mounted page; generation invalidation
+// prevents previous identities or locales from publishing late catalog responses.
+let requestGeneration = 0
+let catalogReady = false
+let disposed = false
+
+// Authentication selects the page shell and catalog; branding derives from injected or cached
+// settings with filtered logo and documentation URLs before rendering external links.
 const isAuthenticated = computed(() => authStore.isAuthenticated)
+const catalogUserID = computed(() => (isAuthenticated.value ? (authStore.user?.id ?? null) : null))
 
 const siteName = computed(() => appStore.siteName || 'TokenRouter')
 const siteLogo = computed(() =>
@@ -495,8 +517,14 @@ const activeFilterCount = computed(
     ].filter(Boolean).length,
 )
 
+// Exclusive groups precede public groups, then use server order and ID ties.
+// Brand choices deduplicate normalized labels while retaining that group order.
 const sortedGroups = computed(() =>
   [...groups.value].sort((left, right) => {
+    const exclusiveDiff = Number(Boolean(right.is_exclusive)) - Number(Boolean(left.is_exclusive))
+    if (exclusiveDiff !== 0) {
+      return exclusiveDiff
+    }
     const sortDiff = (left.sort_order ?? 0) - (right.sort_order ?? 0)
     if (sortDiff !== 0) {
       return sortDiff
@@ -949,31 +977,104 @@ function imagePricingRows(pricing: MarketplaceModelPricing): PricingRow[] {
   })
 }
 
+// fetchMarketplace loads the catalog for the current authenticated identity.
+// Each request captures its generation and user before awaiting the API. A newer
+// request, account change, or unmount prevents that completion from publishing
+// data, errors, or loading state. Same-account refresh failures retain previous
+// data behind the error view; successful refreshes reset unavailable group filters.
+//
+// Public and personal endpoints remain distinct so homepage behavior stays public.
+// Request completion checks identity as well as generation because authentication
+// can change while the shared API client refreshes a token or retries a request.
 async function fetchMarketplace() {
+  if (disposed) return
+  const generation = ++requestGeneration
+  const userID = catalogUserID.value
+  const authenticated = isAuthenticated.value
   loading.value = true
   errorMessage.value = ''
 
+  // isCurrent checks all ownership boundaries before a pending request publishes state.
+  const isCurrent = () =>
+    !disposed &&
+    generation === requestGeneration &&
+    userID === catalogUserID.value &&
+    authenticated === isAuthenticated.value
+
   try {
-    groups.value = await getMarketplaceModels()
+    const result = await (authenticated ? getAvailableMarketplaceModels() : getMarketplaceModels())
+    if (!isCurrent()) return
+    groups.value = result
+    if (
+      selectedGroupId.value !== 'all' &&
+      !result.some((group) => group.id === selectedGroupId.value)
+    ) {
+      selectedGroupId.value = 'all'
+    }
   } catch (error) {
+    if (!isCurrent()) return
     console.error('Failed to load marketplace models:', error)
     errorMessage.value =
       typeof error === 'object' && error !== null && 'message' in error
         ? String(error.message)
         : t('common.unknownError')
   } finally {
-    loading.value = false
+    if (isCurrent()) loading.value = false
   }
 }
 
+// Clear personal data before the next render when identity changes. Synchronous
+// invalidation also prevents an already queued response from restoring the old catalog.
+watch(
+  [isAuthenticated, catalogUserID],
+  () => {
+    requestGeneration++
+    groups.value = []
+    errorMessage.value = ''
+    loading.value = true
+    if (catalogReady) void fetchMarketplace()
+  },
+  { flush: 'sync' },
+)
+
+// Invalidate every pending completion before unmount; queued locale refresh callbacks
+// also check disposal and cannot start another request for this retired page instance.
+onBeforeUnmount(() => {
+  disposed = true
+  requestGeneration++
+})
+
+// Restore theme and account state before loading missing public settings, then
+// request model groups so branding is available for the initial public presentation.
 onMounted(async () => {
   initTheme()
   authStore.checkAuth()
   if (!appStore.publicSettingsLoaded) {
     await appStore.fetchPublicSettings()
   }
+  if (disposed) return
+  catalogReady = true
   await fetchMarketplace()
 })
 
 useLocaleRefresh(fetchMarketplace)
 </script>
+
+<style scoped>
+/*
+ * The exclusive badge uses a muted gold palette distinct from warning amber.
+ * Its crown and text inherit one foreground, while theme-specific surfaces keep
+ * the label readable beside the existing brand and pricing tags.
+ */
+.marketplace-exclusive-tag {
+  border-color: #dfcea3;
+  background-color: #f7f2e5;
+  color: #7c6128;
+}
+
+.dark .marketplace-exclusive-tag {
+  border-color: #594b2c;
+  background-color: #29251c;
+  color: #d6bd7b;
+}
+</style>

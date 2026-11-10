@@ -39,7 +39,7 @@ const (
 	TypeCard        PaymentType = "card"    // historical Stripe card alias
 	TypeLink        PaymentType = "link"    // historical Stripe Link alias
 	TypeEasyPay     PaymentType = "easypay" // EasyPay adapter identity
-	TypeEPUSDT      PaymentType = "epusdt"  // GMPay cryptocurrency checkout
+	TypeEPUSDT      PaymentType = "epusdt"  // EPUSDT EPay cryptocurrency checkout
 	// Airwallex checkout adapter identity.
 	TypeAirwallex PaymentType = "airwallex"
 

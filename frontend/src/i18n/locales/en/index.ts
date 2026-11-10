@@ -10,6 +10,7 @@ import admin from './admin'
 import misc from './misc'
 import team from './team'
 import requests from './requests'
+import plugins from './plugins'
 
 // index.ts assembles the English interface catalog from domain dictionaries and
 // shared legal and localization messages. Named request and administrator
@@ -21,6 +22,7 @@ export default {
   ...intelligence,
   ...remotePool,
   ...tickets,
+  plugins,
   requests,
   legal: {
     login: 'Log in',
@@ -47,7 +49,7 @@ export default {
     back: 'Go back',
     dashboard: 'Go to dashboard',
     help: 'Need help?',
-    support: 'Contact support',
+    support: 'Contact Us',
   },
 
   localization: {
@@ -60,6 +62,8 @@ export default {
       site_name: 'Site name',
       site_title: 'Homepage title',
       site_subtitle: 'Subtitle',
+      site_share_title: 'Share title',
+      site_share_description: 'Share description',
     },
     original: 'Original',
     originalLanguage: 'Original language',

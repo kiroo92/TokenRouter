@@ -28,6 +28,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/TokenFlux/TokenRouter/internal/apikey"
+	"github.com/TokenFlux/TokenRouter/internal/gateway/errorpolicy"
 	forwardcore "github.com/TokenFlux/TokenRouter/internal/gateway/forward"
 	"github.com/TokenFlux/TokenRouter/internal/gateway/media"
 	gatewayprovider "github.com/TokenFlux/TokenRouter/internal/gateway/provider"
@@ -45,6 +46,11 @@ import (
 	upstreamcore "github.com/TokenFlux/TokenRouter/internal/upstream"
 	upstreamopenai "github.com/TokenFlux/TokenRouter/internal/upstream/openai"
 )
+
+// openai_images_execution_test.go verifies authenticated image exchanges through
+// API-key and OAuth routes. Local transports expose request bytes, response
+// framing, observed usage, retry decisions, and client-disconnect behavior without
+// calling a paid generation provider.
 
 // openAIOAuthImageActualSizeTestRun retains execution and HTTP observations
 // from one dimension fixture.
@@ -420,7 +426,7 @@ func TestForwardImagesAdmissionHeartbeatPreservesErrorFraming(t *testing.T) {
 				observer := WaitObserver(c, SSEPingFormatComment, time.Second, true, &started, true)
 				require.NoError(t, observer.Begin())
 				require.NoError(t, observer.Heartbeat())
-				before := OpenAIImagesAdjustedWrittenSize(c)
+				before := HeartbeatAdjustedWrittenSize(c)
 				status := http.StatusOK
 				responseBody := `{"data":{"b64_json":"must-not-be-delivered"}}`
 				if failure == "policy" {
@@ -533,7 +539,7 @@ func TestForwardImagesHeartbeatOnlyRetryKeepsOutputUnstarted(t *testing.T) {
 					require.Nil(t, result)
 					var retry *forwardcore.UpstreamFailoverError
 					require.ErrorAs(t, err, &retry)
-					require.Equal(t, -1, OpenAIImagesAdjustedWrittenSize(c))
+					require.Equal(t, -1, HeartbeatAdjustedWrittenSize(c))
 					require.NotContains(t, rec.Body.String(), "event: error")
 					if heartbeat == "headers" {
 						require.Contains(t, rec.Body.String(), ": keepalive")
@@ -1810,7 +1816,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthAppliesProviderMappingAndReturns
 	require.Equal(t, "acct-123", upstream.lastReq.Header.Get("chatgpt-account-id"))
 	require.Equal(t, "responses=experimental", upstream.lastReq.Header.Get("OpenAI-Beta"))
 
-	require.Equal(t, upstreamopenai.ImagesResponsesMainModel, gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, providerimages.DefaultCodexImageResponsesModel, gjson.GetBytes(upstream.lastBody, "model").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 	require.Equal(t, "image_generation", gjson.GetBytes(upstream.lastBody, "tools.0.type").String())
 	require.Equal(t, "generate", gjson.GetBytes(upstream.lastBody, "tools.0.action").String())
@@ -3588,5 +3594,178 @@ func TestForwardImagesErrorAfterWaitingHeartbeat(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestOpenAIImagesOAuthDriverSelection exercises generation and editing with both
+// client response modes. Provider overrides affect the text driver while image
+// model identity and output conversion remain tied to the requested image.
+func TestOpenAIImagesOAuthDriverSelection(t *testing.T) {
+	for _, configured := range []string{"", "gpt-6.1-sol"} {
+		for _, stream := range []bool{false, true} {
+			for _, endpoint := range []string{"/v1/images/generations", "/v1/images/edits"} {
+				t.Run(fmt.Sprintf("%s/%t/%s", configured, stream, endpoint), func(t *testing.T) {
+					body := []byte(fmt.Sprintf(`{"model":"gpt-image-2","prompt":"draw a cat","stream":%t,"images":[{"image_url":"https://example.com/source.png"}]}`, stream))
+					req := httptest.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+					req.Header.Set("Content-Type", "application/json")
+					rec := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(rec)
+					c.Request = req
+					c.Set("api_key", &apikey.APIKey{ID: 42})
+					parsed, err := media.ParseImageRequest(endpoint, "application/json", body, true)
+					require.NoError(t, err)
+					transport := &auxiliaryHTTPRecorder{resp: &http.Response{
+						StatusCode: 200,
+						Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+						Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"image_generation_call\",\"result\":\"aW1hZ2U=\",\"output_format\":\"png\"}]}}\n\n")),
+					}}
+					svc := newImagesFixture(imagesFixtureInputs{})
+					svc.Requests.Transport = transport
+					provider := &gatewayprovider.ExecutionProvider{Record: providerimages.Record{
+						ID: 1, Platform: capability.PlatformOpenAI, Type: capability.ProviderTypeOAuth,
+						Credentials: map[string]any{"access_token": "test"},
+						Extra:       map[string]any{providerimages.CodexImageResponsesModelKey: configured},
+					}}
+					result, err := svc.ForwardImages(context.Background(), c, provider, body, parsed, "")
+					require.NoError(t, err)
+					expected := configured
+					if expected == "" {
+						expected = providerimages.DefaultCodexImageResponsesModel
+					}
+					require.Equal(t, expected, gjson.GetBytes(transport.lastBody, "model").String())
+					require.Equal(t, "gpt-image-2", gjson.GetBytes(transport.lastBody, "tools.0.model").String())
+					require.Equal(t, "gpt-image-2", result.UpstreamModel)
+					require.Equal(t, 1, result.ImageCount)
+					require.Contains(t, rec.Body.String(), "aW1hZ2U=")
+				})
+			}
+		}
+	}
+}
+
+// TestOpenAIImagesOAuthDriverRejection checks driver diagnostics before and after
+// image waiting heartbeats. Administrator rules control delivery status, message
+// and monitoring while the returned failure remains a terminal HTTP 400, so a
+// rewritten 503 cannot change provider retry or image capability classification.
+func TestOpenAIImagesOAuthDriverRejection(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, committed := range []bool{false, true} {
+			for _, ruleMode := range []string{"none", "custom", "passthrough"} {
+				t.Run(fmt.Sprintf("stream=%t/committed=%t/rule=%s", stream, committed, ruleMode), func(t *testing.T) {
+					synctest.Test(t, func(t *testing.T) {
+						body := []byte(fmt.Sprintf(`{"model":"gpt-image-2","prompt":"draw a cat","stream":%t}`, stream))
+						req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+						req.Header.Set("Content-Type", "application/json")
+						rec := httptest.NewRecorder()
+						c, _ := gin.CreateTestContext(rec)
+						c.Request = req
+						parsed, err := media.ParseImageRequest(req.URL.Path, "application/json", body, true)
+						require.NoError(t, err)
+						expectedStatus := http.StatusBadRequest
+						expectedMessage := "gpt-6-luna"
+						if ruleMode != "none" {
+							expectedStatus = http.StatusServiceUnavailable
+							expectedMessage = "Image service temporarily unavailable"
+							rule := gatewaytestkit.NonFailoverRule(http.StatusBadRequest, "not supported when using Codex", expectedStatus, expectedMessage)
+							if ruleMode == "passthrough" {
+								rule.PassthroughBody = true
+								expectedMessage = "gpt-6-luna"
+							}
+							rule.SkipMonitoring = true
+							BindErrorPassthroughService(c, gatewaytestkit.ErrorRules([]*errorpolicy.ErrorPassthroughRule{rule}))
+						}
+						if committed && !stream {
+							stop := StartOpenAIImagesJSONKeepalive(c, time.Second)
+							defer stop()
+						}
+						calls := 0
+						transport := &auxiliaryHTTPRecorder{onRequest: func(*http.Request) (*http.Response, error) {
+							calls++
+							if committed {
+								// Advance virtual header waiting so the real keepalive controller commits
+								// the selected client format before the upstream rejection is returned.
+								time.Sleep(2 * time.Second)
+							}
+							return &http.Response{
+								StatusCode: http.StatusBadRequest, Header: http.Header{},
+								Body: io.NopCloser(strings.NewReader(`{"detail":"The 'gpt-6-luna' model is not supported when using Codex with a ChatGPT account. See https://example.com/?access_token=driver-review-secret"}`)),
+							}, nil
+						}}
+						svc := newImagesFixture(imagesFixtureInputs{transport: transport, ImageStreamKeepaliveInterval: 1})
+						provider := &gatewayprovider.ExecutionProvider{Record: providerimages.Record{
+							ID: 1, Platform: capability.PlatformOpenAI, Type: capability.ProviderTypeOAuth,
+							Credentials: map[string]any{"access_token": "test"},
+						}}
+						_, err = svc.ForwardImages(context.Background(), c, provider, body, parsed, "")
+						var driverErr *upstreamopenai.OpenAIImagesUpstreamError
+						require.ErrorAs(t, err, &driverErr)
+						require.Equal(t, "image_main_model_unsupported", driverErr.Code)
+						require.Equal(t, http.StatusBadRequest, driverErr.StatusCode)
+						require.False(t, upstreamopenai.IsOpenAIImagesRetryableUpstreamError(driverErr))
+						require.Equal(t, 1, calls)
+						require.Equal(t, ruleMode != "none", c.GetBool(OpsSkipPassthroughKey))
+						require.Contains(t, rec.Body.String(), expectedMessage)
+						require.NotContains(t, rec.Body.String(), "driver-review-secret")
+						if committed {
+							require.Equal(t, http.StatusOK, rec.Code)
+						} else {
+							require.Equal(t, expectedStatus, rec.Code)
+						}
+						if committed && stream {
+							require.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
+							require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error"))
+						} else {
+							require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+							require.True(t, gjson.ValidBytes(rec.Body.Bytes()))
+							require.Equal(t, "image_main_model_unsupported", gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
+						}
+						switch ruleMode {
+						case "custom":
+							require.NotContains(t, rec.Body.String(), "gpt-6-luna")
+						case "none":
+							require.Contains(t, rec.Body.String(), "gpt-image-2")
+						}
+					})
+				})
+			}
+		}
+	}
+}
+
+// TestForwardImagesGIFBothCredentials preserves actual animation observations.
+// Native JSON and OAuth Responses fixtures omit image format and size metadata;
+// returned bytes must still establish GIF MIME, frame units, and dimensions.
+func TestForwardImagesGIFBothCredentials(t *testing.T) {
+	encoded := "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAkQBACwAAAAAAQABAAACAkQBADs="
+	for _, kind := range []string{capability.ProviderTypeAPIKey, capability.ProviderTypeOAuth} {
+		t.Run(kind, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-image-2.6-flare","prompt":"A blinking star","output_format":"gif","frame_count":4,"response_format":"url"}`)
+			parsed, err := media.ParseImageRequest("/v1/images/generations", "application/json", body, true)
+			require.NoError(t, err)
+			response := `{"data":[{"b64_json":"` + encoded + `"}],"usage":{"input_tokens":5,"output_tokens":100}}`
+			contentType := "application/json"
+			if kind == capability.ProviderTypeOAuth {
+				response = `data: {"type":"response.completed","response":{"tool_usage":{"image_gen":{"input_tokens":5,"output_tokens":100,"output_tokens_details":{"image_tokens":100}}},"output":[{"type":"image_generation_call","id":"gif-test","result":"` + encoded + `"}]}}` + "\n\n"
+				contentType = "text/event-stream"
+			}
+			transport := &auxiliaryHTTPRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(response))}}
+			service := newImagesFixture(imagesFixtureInputs{transport: transport})
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+			value := &gatewayprovider.ExecutionProvider{Record: providerimages.Record{ID: 12, Platform: capability.PlatformOpenAI, Type: kind, Credentials: map[string]any{"api_key": "test-key", "access_token": "test-oauth"}}}
+			result, err := service.ForwardImages(context.Background(), c, value, body, parsed, "")
+			require.NoError(t, err)
+			require.Equal(t, 1, result.ImageCount)
+			require.Equal(t, 2, result.ImageFrameCount)
+			require.Equal(t, 100, result.Usage.ImageOutputTokens)
+			require.Contains(t, result.ImageOutputSizes, "1x1")
+			require.Equal(t, "gif", gjson.Get(recorder.Body.String(), "output_format").String())
+			if kind == capability.ProviderTypeOAuth {
+				require.Equal(t, "data:image/gif;base64,"+encoded, gjson.Get(recorder.Body.String(), "data.0.url").String())
+				require.Equal(t, int64(4), gjson.GetBytes(transport.lastBody, "tools.0.frame_count").Int())
+			}
+			require.Len(t, transport.requests, 1)
+		})
 	}
 }

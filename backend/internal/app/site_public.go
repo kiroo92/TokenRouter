@@ -58,7 +58,7 @@ func provideAnnouncementExpiry(repo site.AnnouncementRepository) *site.Announcem
 // provideSitePages binds page storage and display settings using the configured
 // pricing data directory.
 func provideSitePages(cfg *config.Config, settings *site.DisplaySettings) *sitehttp.PageHandler {
-	return sitehttp.NewPageHandler(site.NewPages(filesystem.New(cfg.Pricing.DataDir), settings))
+	return sitehttp.NewPageHandler(site.NewPages(filesystem.New(cfg.Storage.Dir), settings))
 }
 
 // provideSitePublic binds public authentication, team, and ranking
@@ -66,14 +66,17 @@ func provideSitePages(cfg *config.Config, settings *site.DisplaySettings) *siteh
 // version comes from the store, while timezone display uses the supplied
 // calendar and configured timezone text.
 func provideSitePublic(store *settings.Store, oauth *identity.OAuthSettings, cfg *config.Config, calendar timezone.Calendar) *site.PublicService {
-	p := site.NewPublicService(site.NewInputSource(store, site.PublicInputOptions{Auth: func(raw map[string]string) site.PublicAuth {
-		value := oauth.PublicSettingsFromValues(raw)
-		enabled, selfService := team.PublicSettings(raw, cfg.Team.Enabled, cfg.Team.SelfServiceEnabled)
-		return site.PublicAuth{LinuxDo: value.LinuxDo, DingTalk: value.DingTalk, OIDC: value.OIDC, OIDCName: value.OIDCName, WeChat: value.WeChat, WeChatOpen: value.WeChatOpen, WeChatMP: value.WeChatMP, WeChatMobile: value.WeChatMobile, GitHub: value.GitHub, Google: value.Google, GoogleOneTap: value.GoogleOneTap, GoogleClientID: value.GoogleClientID, Team: enabled, TeamSelfService: selfService, Passkey: cfg.WebAuthn.Enabled, TencentRegion: value.TencentRegion, AliyunRegion: value.AliyunRegion, RegistrationSuffixes: value.RegistrationSuffixes}
-	}, Usage: func(raw map[string]string) site.PublicUsage {
-		value := usage.ParseRankingSettings(raw)
-		return site.PublicUsage{Limit: value.Limit, Enabled: value.Enabled, SortBy: string(value.SortBy), ShowTotalTokens: value.ShowTotalTokens, ShowRequests: value.ShowRequests, ShowActualCost: value.ShowActualCost}
-	}, Version: store.Version}), calendar, cfg.Timezone)
+	p := site.NewPublicService(site.NewInputSource(store, site.PublicInputOptions{
+		FrontendURL: func() string { return cfg.Site.FrontendURL },
+		Auth: func(raw map[string]string) site.PublicAuth {
+			value := oauth.PublicSettingsFromValues(raw)
+			enabled, selfService := team.PublicSettings(raw, cfg.Team.Enabled, cfg.Team.SelfServiceEnabled)
+			return site.PublicAuth{LinuxDo: value.LinuxDo, DingTalk: value.DingTalk, OIDC: value.OIDC, OIDCName: value.OIDCName, WeChat: value.WeChat, WeChatOpen: value.WeChatOpen, WeChatMP: value.WeChatMP, WeChatMobile: value.WeChatMobile, GitHub: value.GitHub, Google: value.Google, GoogleOneTap: value.GoogleOneTap, GoogleClientID: value.GoogleClientID, Team: enabled, TeamSelfService: selfService, Passkey: cfg.Auth.WebAuthn.Enabled, TencentRegion: value.TencentRegion, AliyunRegion: value.AliyunRegion, RegistrationSuffixes: value.RegistrationSuffixes}
+		}, Usage: func(raw map[string]string) site.PublicUsage {
+			value := usage.ParseRankingSettings(raw)
+			return site.PublicUsage{Limit: value.Limit, Enabled: value.Enabled, SortBy: string(value.SortBy), ShowTotalTokens: value.ShowTotalTokens, ShowRequests: value.ShowRequests, ShowActualCost: value.ShowActualCost}
+		}, Version: store.Version,
+	}), calendar, cfg.Timezone)
 	return p
 }
 
@@ -81,7 +84,7 @@ func provideSitePublic(store *settings.Store, oauth *identity.OAuthSettings, cfg
 // URL. cfg is retained by that callback, which the display reader invokes when
 // its own fallback rule needs it.
 func provideSiteDisplay(store *settings.Store, cfg *config.Config) *site.DisplaySettings {
-	return site.NewDisplaySettings(store, func() string { return cfg.Server.FrontendURL })
+	return site.NewDisplaySettings(store, func() string { return cfg.Site.FrontendURL })
 }
 
 // provideSitePublicHTTP supplies public site data and running version to HTTP.

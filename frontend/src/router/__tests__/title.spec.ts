@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { PluginUI } from '@/api/plugins.types'
 import {
   resolveDocumentTitle,
   resolveRouteDocumentTitle,
@@ -106,4 +107,38 @@ describe('purchase display keys', () => {
     }
     expect(resolveRouteDisplayKeys(profileRoute, false)).toEqual(profileRoute.meta)
   })
+})
+
+// User and administrator contributions can share an empty plugin-relative path.
+// Title resolution selects the exact audience and retains the site suffix after branding updates.
+it('uses audience-specific plugin titles after discovery', () => {
+  const plugin: PluginUI = {
+    id: 'test.title',
+    version: '1.0.0',
+    name: 'Title',
+    script: { url: '/asset', integrity: 'hash' },
+    styles: [],
+    menus: [],
+    pages: [
+      { id: 'home', path: '', audience: 'user', title: 'Check-in' },
+      { id: 'admin', path: '', audience: 'admin', title: 'Check-in history' },
+    ],
+  }
+  const route = {
+    name: 'PluginPage',
+    params: { pluginId: plugin.id, subpath: [] },
+    meta: { title: 'Plugin' },
+  }
+  expect(resolveRouteDocumentTitle(route, 'Site', [], [plugin])).toBe('Check-in - Site')
+  expect(
+    resolveRouteDocumentTitle({ ...route, name: 'AdminPluginPage' }, 'Site', [], [plugin]),
+  ).toBe('Check-in history - Site')
+  expect(
+    resolveRouteDocumentTitle(
+      { ...route, params: { pluginId: plugin.id, subpath: ['missing'] } },
+      'Site',
+      [],
+      [plugin],
+    ),
+  ).toBe('Plugin - Site')
 })

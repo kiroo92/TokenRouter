@@ -17,7 +17,8 @@ import time
 # Source changes select related tests, with deletions selecting the full suite
 # because their dependency graph may already be absent from the working tree.
 # Backend locale changes retain their frontend related-test path, and pure Go
-# changes require no Node or pnpm installation.
+# changes require no Node or pnpm installation. Architecture scans rerun for
+# backend or policy changes because their inputs include another Go module's files.
 
 # ROOT locates checkout-relative commands; Git's zero object and empty tree identify
 # deleted references and repositories without an existing comparison branch.
@@ -113,21 +114,34 @@ def plan(files, base, go_packages=go_test_packages):
     """plan maps changed paths to ordered working-directory and command pairs.
 
     Go changes select package checks and both committed-range and working-tree
-    formatting. Frontend changes run all static checks, then related tests for
+    formatting. Architecture source and backend changes always rerun the scan
+    without cached test results. Frontend changes run all static checks, then related tests for
     existing source paths or the full suite for configuration and deleted files.
     Backend locale paths independently select the frontend tests importing them.
+
+    The plugin SDK is an independent module, so backend tests do not discover
+    all of its packages. SDK changes select its own checks and the host consumers;
+    frontend SDK tests compile a minimal Vue consumer against the public types.
 
     Keeping language selection here lets pure Go pushes run without frontend
     tools. Dependency installs precede frontend checks, so those checks inspect
     the dependency graph recorded by the working tree's frozen lockfile.
     """
     commands = [('.', ['git', 'diff', '--check', base])]
+    sdk_web = any(f.startswith('plugin-sdk/web/')
+                  or f == 'plugin-sdk/prettier.config.mjs' for f in files)
+    sdk_go = any(f.startswith('plugin-sdk/go/') for f in files)
     go_files = [f for f in files if f.startswith('backend/') and f.endswith('.go')]
-    go_deps = any(f in ('backend/go.mod', 'backend/go.sum') for f in files)
-    if go_files or go_deps:
+    go_deps = any(f in ('backend/go.mod', 'backend/go.sum', 'plugin-sdk/go/go.mod',
+                       'plugin-sdk/go/go.sum') for f in files)
+    if go_files or go_deps or sdk_go:
         commands.append(('.', ['python3', 'tools/format_go.py', '--check', '--base', base]))
         commands.append(('.', ['python3', 'tools/format_go.py', '--check']))
-        commands.append(('tools/architecture', ['env', 'GOWORK=off', 'go', 'test', './...']))
+    if go_files or go_deps or any(f.startswith('tools/architecture/') for f in files):
+        # Architecture reads backend sources outside its Go module. Disable result
+        # caching so an unchanged checker cannot conceal new dependency violations.
+        commands.append(('tools/architecture', ['env', 'GOWORK=off', 'go', 'test', '-count=1', './...']))
+    if go_files or go_deps:
         if go_deps:
             lint_targets = test_packages = ['./...']
         else:
@@ -142,6 +156,22 @@ def plan(files, base, go_packages=go_test_packages):
                                          '--new-from-rev=' + base, *lint_targets]))
         if test_packages:
             commands.append(('backend', ['go', 'test', *test_packages]))
+
+    if sdk_go:
+        commands.append(('plugin-sdk/go', ['bash', '../../tools/golangci-lint.sh', 'run', './...']))
+        commands.append(('plugin-sdk/go', ['go', 'test', './...']))
+        if not go_files and not go_deps:
+            # SDK contracts are consumed by the host runtime and assembly even
+            # when no backend file changes, so compile and test those consumers.
+            commands.append(('backend', ['go', 'test', './internal/plugin/...', './internal/app']))
+    if sdk_web:
+        commands.append(('.', ['make', 'prepare-plugin-sdk-web']))
+        commands.append(('.', ['pnpm', '--dir', 'plugin-sdk/web', 'run', 'format:check']))
+        commands.append(('.', ['pnpm', '--dir', 'plugin-sdk/web', 'run', 'typecheck']))
+        commands.append(('.', ['pnpm', '--dir', 'plugin-sdk/web', 'test']))
+    if any(f.startswith('.agents/skills/tr-release/scripts/') for f in files):
+        commands.append(('.', ['python3', '-m', 'unittest', 'discover', '-s',
+                               '.agents/skills/tr-release/scripts', '-p', 'test_*.py']))
 
     frontend = [f for f in files if f.startswith('frontend/')]
     locale = [f for f in files if f.startswith('backend/internal/pkg/locale/') and f.endswith('.json')]

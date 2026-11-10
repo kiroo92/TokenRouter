@@ -31,8 +31,7 @@ import (
 // rejection marking refers to the same prepared entry that a repeated request
 // can present. HTTP exchange callbacks carry one token, fingerprint and route
 // preparation through the shared runner's local recovery and response-reading
-// phases. Configured SSE heartbeats cover response-header waits and stop before
-// the response reader takes over output and its own heartbeat policy.
+// phases.
 
 // OpenAIResponsesExecutor combines selected-attempt request, output, text and
 // lineage services for Responses forwarding. App assembly shares these
@@ -190,7 +189,9 @@ func (s *OpenAIResponsesExecutor) Forward(ctx context.Context, c *gin.Context, p
 		RequestedModel: requestedModel, OriginalModel: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel,
 		ReasoningEffort: reasoningEffort, ReasoningEffortValue: reasoningEffortValue,
 		ImageBillingModel: imageBillingModel, ImageSizeTier: imageSizeTier, ImageInputSize: imageInputSize,
-		Stream: reqStream, OAuth: provider.View().IsOAuth(), Shadow: provider.View().IsShadow(), Grok: provider.View().IsGrok(), StartedAt: startTime,
+		ImageMainModelAdapted: transformed.ImageMainModelAdapted,
+		DefaultInstructions:   transformed.DefaultInstructions,
+		Stream:                reqStream, OAuth: provider.View().IsOAuth(), Shadow: provider.View().IsShadow(), Grok: provider.View().IsGrok(), StartedAt: startTime,
 	}
 	exchange := openai.HTTPExchangeOptions{
 		StartedAt:          startTime,
@@ -206,10 +207,6 @@ func (s *OpenAIResponsesExecutor) Forward(ctx context.Context, c *gin.Context, p
 			if provider.Record.ProxyID != nil && provider.Record.Proxy != nil {
 				proxyURL = provider.Record.Proxy.URL()
 			}
-			// Header waits precede the reader's heartbeat loop. End this controller
-			// before response processing so heartbeat writes cannot overlap reader metadata or output.
-			stop := s.Output.StartHeaderKeepalive(c, reqStream)
-			defer stop()
 			return s.Requests.Transport.DoWithTLS(request, proxyURL, provider.Record.ID, provider.Record.Concurrency, s.Requests.TLSProfile(provider, tlsRouterMatch))
 		},
 		Latency: func(elapsed time.Duration) {

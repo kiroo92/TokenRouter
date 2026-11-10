@@ -9,21 +9,21 @@ import (
 	"github.com/arch-go/arch-go/v2/api/configuration"
 )
 
-// policy.go derives per-file dependency rules from module, directory role,
-// leaf package, and upstream platform tables. Production and test additions
-// are selected separately before the rule builder combines allow lists with
-// restrictions on adapter implementations and retired packages. File permissions
-// identify exact callers for selected imports within those broader rules.
+// policy.go builds import constraints from source-file ownership and adapter roles.
+// Registered modules receive only their declared collaborations, while technical
+// libraries follow the owning role and narrow exceptions remain file-specific.
+// Multiple rules apply together, so a permissive module relationship cannot
+// override an adapter boundary or a retired-package prohibition. Test files can
+// receive additional fixture dependencies without granting them to production code.
 //
-// Project paths become anchored regular expressions because arch-go interprets
-// dependency selectors as patterns. Empty allow lists use an impossible pattern
-// so the library cannot interpret an empty slice as unrestricted access. Role
-// rules also distinguish application code from test fixtures, and selected file
-// exceptions control otherwise blocked standard-library imports.
+// The plugin SDK is a separate module under the same repository import prefix.
+// Its manifest, index, and generated protocol contracts can cross into core
+// logic, but process helpers, package filesystem code, and testing fixtures stay
+// outside production core imports. These explicit restrictions preserve that
+// boundary even though arch-go classifies the shared prefix as internal.
 
 const (
-	// modulePath anchors project import selectors so internal package checks
-	// share the backend module identity across dependency rules.
+	// modulePath identifies repository imports for file dependency checks.
 	modulePath = "github.com/TokenFlux/TokenRouter"
 )
 
@@ -174,6 +174,15 @@ func denyProject(values []string) *dependencyRule {
 	return &dependencyRule{ShouldNotDependsOn: &dependencies{Internal: expressions(values, true)}}
 }
 
+// rulesFor combines module, role, leaf, platform, and global import restrictions.
+// An unregistered source receives a closed dependency set, while registered
+// sources receive only the libraries and collaborations declared for their owner.
+//
+// Rules remain conjunctive: allowing one module dependency cannot bypass a
+// storage boundary, a retired namespace, or a core implementation prohibition.
+// Standard-library restrictions separately include permitted golang.org/x imports
+// because arch-go classifies them as standard. Exact file exceptions are applied
+// only at their declared boundary and do not authorize neighboring source files.
 // @project-doc docs/operations/development_workflow.md#backend_dependency_rules
 func rulesFor(filename, standardLibrary string) []*dependencyRule {
 	l := locate(filename)
@@ -184,7 +193,7 @@ func rulesFor(filename, standardLibrary string) []*dependencyRule {
 		}}}
 	}
 
-	// arch-go v2 将 golang.org/x 归到 Standard，必须按真实第三方许可补入，不能整体放行。
+	// arch-go classifies golang.org/x as standard, so add only declared libraries instead of permitting every package under that namespace.
 	standard := []string{standardLibrary}
 	var external []string
 	for _, library := range roleLibraries[l.role].paths(l.test) {
@@ -236,8 +245,14 @@ func rulesFor(filename, standardLibrary string) []*dependencyRule {
 	case "core":
 		blocked = []string{"database/sql", "net/rpc"}
 		if !l.test {
+			if l.module == "internal/plugin" {
+				rules = append(rules, denyProject([]string{
+					"plugin-sdk/go/sdk/...", "plugin-sdk/go/pkgfmt/...",
+					"plugin-sdk/go/plugintest/...", "plugin-sdk/go/internal/...",
+				}))
+			}
 			blocked = append(blocked, "net/http")
-			// 稳定的运行策略投影允许从设置模块读取，HTTP 实现仍被禁止。
+			// Core modules may consume stable settings projections while HTTP implementations remain forbidden, preventing transport concerns from entering use cases.
 			forbidden := implementationPaths("httpapi", "postgres", "rediscache", "provider", "testkit")
 			forbidden = append(forbidden, "ent/...", "internal/app/...", "internal/config/...", "internal/infra/postgres/...", "internal/infra/redis/...", "internal/infra/httpclient/...")
 			for platform := range platformDependencies {

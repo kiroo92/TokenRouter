@@ -34,8 +34,11 @@
             :class="compactUserColumn ? 'min-w-0 justify-end gap-1 md:w-32 md:justify-start' : ''"
             data-test="usage-user-cell"
           >
+            <span v-if="row.system_usage">
+              {{ t(`admin.usage.requestSources.${row.request_source}`) }}
+            </span>
             <button
-              v-if="usageUserDisplayName(row) && userClickable"
+              v-else-if="usageUserDisplayName(row) && userClickable && row.user_id"
               class="font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
               :class="compactUserColumn ? 'min-w-0 truncate' : ''"
               @click="$emit('userClick', row.user_id, row.user?.email)"
@@ -60,7 +63,9 @@
             >
               {{ t('admin.usage.userDeletedBadge') }}
             </span>
-            <span class="ml-1 shrink-0 text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
+            <span v-if="row.user_id" class="ml-1 shrink-0 text-gray-500 dark:text-gray-400"
+              >#{{ row.user_id }}</span
+            >
           </div>
         </template>
 
@@ -196,7 +201,10 @@
             <Icon name="modalityImage" size="sm" class="h-4 w-4 text-indigo-500" />
             <!-- The image count provides the mobile card label's text baseline. -->
             <span class="self-baseline font-medium text-gray-900 dark:text-white"
-              >{{ row.image_count }}{{ t('usage.imageUnit') }}</span
+              >{{ row.image_count }}{{ t('usage.imageUnit')
+              }}<span v-if="row.image_frame_count">
+                · {{ row.image_frame_count }}{{ t('usage.imageFrameUnit') }}</span
+              ></span
             >
             <span class="text-gray-400">({{ formatImageBillingSize(row, t) }})</span>
           </div>
@@ -222,7 +230,7 @@
                 <div class="inline-flex items-center gap-1">
                   <Icon name="arrowDown" size="sm" class="h-3.5 w-3.5 text-fuchsia-500" />
                   <span class="font-medium text-fuchsia-600 dark:text-fuchsia-400">{{
-                    row.image_input_tokens.toLocaleString()
+                    uncachedImageInputTokens(row).toLocaleString()
                   }}</span>
                 </div>
               </div>
@@ -285,9 +293,24 @@
         <template #cell-cost="{ row }">
           <div class="text-sm">
             <div class="flex items-center gap-1.5">
-              <span class="font-medium text-green-600 dark:text-green-400">{{
-                formatDetailedBalance(row.actual_cost)
-              }}</span>
+              <span
+                v-if="row.system_usage?.cost_state === 'unknown'"
+                class="text-gray-500 dark:text-gray-400"
+              >
+                {{ t('usage.costUnknown') }}
+              </span>
+              <!-- System costs and customer charges share amount styling while retaining their recorded USD or configured balance unit. -->
+              <span
+                v-else
+                class="font-medium text-green-600 dark:text-green-400"
+                :title="row.system_usage ? t('usage.providerCost') : undefined"
+              >
+                {{
+                  row.system_usage
+                    ? formatDetailedUsdAmount(providerBilled(row))
+                    : formatDetailedBalance(row.actual_cost)
+                }}
+              </span>
               <!-- L identifies applied long-context billing; the recorded multiplier determines its charge rather than a fixed doubling. -->
               <span
                 v-if="row.long_context_billing_applied"
@@ -313,7 +336,15 @@
               </div>
             </div>
             <div
-              v-if="showProviderBilling && row.provider_rate_multiplier != null"
+              v-if="row.system_usage?.cost_state === 'partial'"
+              class="mt-0.5 text-xs text-gray-500 dark:text-gray-400"
+            >
+              {{ t('usage.costPartial') }}
+            </div>
+            <div
+              v-else-if="
+                !row.system_usage && showProviderBilling && row.provider_rate_multiplier != null
+              "
               class="mt-0.5 text-xs text-orange-500 dark:text-orange-400"
             >
               A {{ formatDetailedUsdAmount(providerBilled(row)) }}
@@ -507,7 +538,7 @@
               >
                 <span class="text-gray-400">{{ t('usage.imageInputTokens') }}</span>
                 <span class="font-medium text-fuchsia-300">{{
-                  tokenTooltipData.image_input_tokens.toLocaleString()
+                  uncachedImageInputTokens(tokenTooltipData).toLocaleString()
                 }}</span>
               </div>
               <div
@@ -808,7 +839,7 @@
                     >{{
                       formatTokenPricePerMillion(
                         tooltipData.image_input_cost ?? 0,
-                        tooltipData.image_input_tokens,
+                        uncachedImageInputTokens(tooltipData),
                       )
                     }}
                     {{ t('usage.perMillionTokens') }}</span
@@ -851,7 +882,10 @@
                 <div class="flex items-center justify-between gap-4">
                   <span class="text-gray-400">{{ t('usage.imageCount') }}</span>
                   <span class="font-medium text-white"
-                    >{{ tooltipData.image_count }}{{ t('usage.imageUnit') }}</span
+                    >{{ tooltipData.image_count }}{{ t('usage.imageUnit')
+                    }}<span v-if="tooltipData.image_frame_count">
+                      · {{ tooltipData.image_frame_count }}{{ t('usage.imageFrameUnit') }}</span
+                    ></span
                   >
                 </div>
                 <div class="flex items-center justify-between gap-4">
@@ -1063,6 +1097,7 @@ import { COPY_FEEDBACK_MS } from '@/constants/ui'
 import { formatDateTime, formatReasoningEffort, reasoningEffortValuesEqual } from '@/utils/format'
 import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
+import { formatRequestSize } from '@/utils/requestTiming'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import { formatUsageTps } from '@/utils/usageTps'
@@ -1093,6 +1128,7 @@ import {
   hasImageOutputTokens,
   textOutputTokens,
   hasImageInputTokens,
+  uncachedImageInputTokens,
   textInputTokens,
   hasImageInputCost,
 } from '@/utils/imageUsage'
@@ -1472,17 +1508,6 @@ const formatDuration = (ms: number | null | undefined): string => {
   const totalSec = Math.round(ms / 1000)
   if (totalSec < 3600) return `${Math.floor(totalSec / 60)}m ${totalSec % 60}s`
   return `${Math.floor(totalSec / 3600)}h ${Math.floor((totalSec % 3600) / 60)}m`
-}
-
-// formatRequestSize renders bytes using binary thresholds with B, KB, or MB labels. Missing
-// observations use a dash, while kilobytes retain one decimal and megabytes retain two
-// decimals.
-const formatRequestSize = (bytes: number | null | undefined): string => {
-  if (bytes == null) return '-'
-  // Use binary unit thresholds for recorded request payload sizes.
-  if (bytes < 1024) return `${bytes}B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
-  return `${(bytes / (1024 * 1024)).toFixed(2)}MB`
 }
 
 // showTooltip opens the cost panel for a row and measures it after Vue renders. The anchor

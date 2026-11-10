@@ -372,7 +372,7 @@
                   <p>{{ t('admin.providers.gemini.providerType.apiKeyNote') }}</p>
                   <a
                     :href="geminiHelpLinks.apiKey"
-                    class="font-medium text-primary-600 hover:underline dark:text-primary-500"
+                    class="font-medium text-link"
                     target="_blank"
                     rel="noreferrer"
                   >
@@ -419,7 +419,7 @@
                       {{ t('admin.providers.gemini.oauthType.codeAssistRequirement') }}
                       <a
                         :href="geminiHelpLinks.gcpProject"
-                        class="ml-1 text-primary-600 hover:underline dark:text-primary-500"
+                        class="ml-1 text-link"
                         target="_blank"
                         rel="noreferrer"
                         @click.stop
@@ -1293,6 +1293,13 @@
                 :hint="t('admin.providers.openai.flattenNamespacesDesc')"
                 testid="create-openai-flatten-namespaces-toggle"
               />
+              <SettingToggleRow
+                v-if="isOpenAIOAuthCategory || providerCategory === 'apikey'"
+                id="create-openai-images-gif"
+                v-model="openAIImagesGIFEnabled"
+                :label="t('admin.providers.openai.imagesGIFEnabled')"
+                :hint="t('admin.providers.openai.imagesGIFEnabledDesc')"
+              />
               <template v-if="providerCategory === 'apikey'">
                 <SettingToggleRow
                   id="create-openai-continuation-supported"
@@ -1350,6 +1357,25 @@
                   v-model="codexFingerprintMode"
                   data-testid="create-codex-fingerprint-mode-select"
                   :options="codexFingerprintModeOptions"
+                />
+              </SettingRow>
+            </SettingsSection>
+
+            <SettingsSection v-if="isOpenAIOAuthCategory">
+              <SettingRow
+                id="create-image-responses-model"
+                label-for="create-image-responses-model-input"
+                :label="t('admin.providers.openai.imageResponsesModel')"
+                :hint="t('admin.providers.openai.imageResponsesModelDesc')"
+                field
+              >
+                <input
+                  id="create-image-responses-model-input"
+                  v-model="codexImageResponsesModel"
+                  data-testid="create-image-responses-model-input"
+                  type="text"
+                  class="input"
+                  :placeholder="t('admin.providers.openai.imageResponsesModelDefault')"
                 />
               </SettingRow>
             </SettingsSection>
@@ -1589,7 +1615,7 @@
                 href="https://policies.google.com/terms"
                 target="_blank"
                 rel="noreferrer"
-                class="text-sm text-primary-600 hover:underline dark:text-primary-500"
+                class="text-sm text-link"
               >
                 {{ t('admin.providers.gemini.setupGuide.links.countryCheck') }}
               </a>
@@ -1598,7 +1624,7 @@
                 href="https://policies.google.com/country-association-form"
                 target="_blank"
                 rel="noreferrer"
-                class="text-sm text-primary-600 hover:underline dark:text-primary-500"
+                class="text-sm text-link"
               >
                 修改归属地
               </a>
@@ -1607,7 +1633,7 @@
                 href="https://gemini.google.com/gems/create?hl=en-US&pli=1"
                 target="_blank"
                 rel="noreferrer"
-                class="text-sm text-primary-600 hover:underline dark:text-primary-500"
+                class="text-sm text-link"
               >
                 {{ t('admin.providers.gemini.setupGuide.links.geminiWebActivation') }}
               </a>
@@ -1616,7 +1642,7 @@
                 href="https://console.cloud.google.com"
                 target="_blank"
                 rel="noreferrer"
-                class="text-sm text-primary-600 hover:underline dark:text-primary-500"
+                class="text-sm text-link"
               >
                 {{ t('admin.providers.gemini.setupGuide.links.gcpProject') }}
               </a>
@@ -1712,7 +1738,7 @@
             :href="geminiQuotaDocs.codeAssist"
             target="_blank"
             rel="noreferrer"
-            class="text-sm text-primary-600 hover:underline dark:text-primary-500"
+            class="text-sm text-link"
           >
             {{ t('admin.providers.gemini.quotaPolicy.docs.codeAssist') }}
           </a>
@@ -1720,7 +1746,7 @@
             :href="geminiQuotaDocs.aiStudio"
             target="_blank"
             rel="noreferrer"
-            class="text-sm text-primary-600 hover:underline dark:text-primary-500"
+            class="text-sm text-link"
           >
             {{ t('admin.providers.gemini.quotaPolicy.docs.aiStudio') }}
           </a>
@@ -1728,7 +1754,7 @@
             :href="geminiQuotaDocs.vertex"
             target="_blank"
             rel="noreferrer"
-            class="text-sm text-primary-600 hover:underline dark:text-primary-500"
+            class="text-sm text-link"
           >
             {{ t('admin.providers.gemini.quotaPolicy.docs.vertex') }}
           </a>
@@ -1745,7 +1771,7 @@
             :href="geminiHelpLinks.apiKey"
             target="_blank"
             rel="noreferrer"
-            class="text-sm text-primary-600 hover:underline dark:text-primary-500"
+            class="text-sm text-link"
           >
             {{ t('admin.providers.gemini.providerType.apiKeyLink') }}
           </a>
@@ -1753,7 +1779,7 @@
             :href="geminiHelpLinks.aiStudioPricing"
             target="_blank"
             rel="noreferrer"
-            class="text-sm text-primary-600 hover:underline dark:text-primary-500"
+            class="text-sm text-link"
           >
             {{ t('admin.providers.gemini.providerType.quotaLink') }}
           </a>
@@ -1967,6 +1993,8 @@ const oauthStepTitle = computed(() => {
 // upstreamRequestIdHeader selects the upstream response header captured in request
 // diagnostics and usage records; a blank field uses the backend X-Request-ID default.
 const upstreamRequestIdHeader = ref('')
+// codexImageResponsesModel selects an OAuth image driver; blank uses the backend default.
+const codexImageResponsesModel = ref('')
 // withUpstreamRequestIdHeader applies the trimmed diagnostic header override to
 // optional metadata. Blank input preserves the supplied base unchanged,
 // allowing the backend default header to remain effective for the created
@@ -2421,6 +2449,8 @@ const openAINativeCompactionV2Mode = ref<OpenAICompactMode>('force_on')
 // HTTP continuation starts disabled and is enabled only by the administrator for upstream previous_response_id support.
 const openAIResponsesContinuationSupported = ref(false)
 // Image URL backfill starts disabled and is serialized only for OpenAI API Key providers.
+/** GIF defaults to enabled for each new OpenAI provider draft. */
+const openAIImagesGIFEnabled = ref(true)
 const openAIImagesURLToB64JSON = ref(false)
 const responsesWSConnectionMode = ref<ResponsesWSConnectionMode>(RESPONSES_WS_POOLED)
 const codexCLIOnlyAllowClaudeCodeEnabled = ref(false)
@@ -3109,6 +3139,7 @@ watch(
       openaiPassthroughEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
       openAIResponsesContinuationSupported.value = false
+      openAIImagesGIFEnabled.value = true
       openAIImagesURLToB64JSON.value = false
       responsesWSConnectionMode.value = RESPONSES_WS_POOLED
       codexCLIOnlyAllowClaudeCodeEnabled.value = false
@@ -3442,6 +3473,7 @@ const resetForm = () => {
   upstreamUsageWalletAccessToken.value = ''
   upstreamUsageWalletUserId.value = ''
   upstreamRequestIdHeader.value = ''
+  codexImageResponsesModel.value = ''
   editQuotaLimit.value = null
   editQuotaDailyLimit.value = null
   editQuotaWeeklyLimit.value = null
@@ -3488,6 +3520,7 @@ const resetForm = () => {
   openAICompactMode.value = 'force_on'
   openAINativeCompactionV2Mode.value = 'force_on'
   openAIResponsesContinuationSupported.value = false
+  openAIImagesGIFEnabled.value = true
   openAIImagesURLToB64JSON.value = false
   responsesWSConnectionMode.value = RESPONSES_WS_POOLED
   codexCLIOnlyAllowClaudeCodeEnabled.value = false
@@ -3589,8 +3622,10 @@ const buildOpenAIExtra = (base?: Record<string, unknown>) =>
       tlsFingerprintProfileId: tlsFingerprintProfileId.value,
       tlsFingerprintRouterId: tlsFingerprintRouterId.value,
       codexFingerprintMode: codexFingerprintMode.value,
+      codexImageResponsesModel: codexImageResponsesModel.value,
       openAICompactMode: openAICompactMode.value,
       openAINativeCompactionV2Mode: openAINativeCompactionV2Mode.value,
+      openAIImagesGIFEnabled: openAIImagesGIFEnabled.value,
       openAIImagesURLToB64JSON: openAIImagesURLToB64JSON.value,
       openAIResponsesContinuationSupported: openAIResponsesContinuationSupported.value,
     },

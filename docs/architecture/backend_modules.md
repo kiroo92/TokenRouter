@@ -56,6 +56,11 @@ backend/
 │   ├── requestlog/                                      请求摘要、内存批写与查询
 │   │   ├── httpapi/                                     管理员请求诊断详情
 │   │   └── postgres/                                    摘要、历史关联与归属查询
+│   ├── plugin/                                          插件安装、配置、运行策略与开发目录
+│   │   ├── httpapi/                                     安装管理、配置、额度和日志接口
+│   │   ├── postgres/                                    安装快照与索引源持久化
+│   │   └── provider/                                    子进程、gRPC 回调、日志和安装包存储
+│   │       └── testdata/hostdeath/                      Linux 父进程异常退出测试宿主
 │   ├── audit/                                           管理员操作审计与审计数据清理
 │   │   ├── httpapi/                                     HTTP 路由、鉴权接入与输入输出适配
 │   │   └── postgres/                                    PostgreSQL 持久化及事务适配
@@ -75,7 +80,9 @@ backend/
 │   │   ├── provider/                                    计费回退告警与时区适配
 │   │   ├── rediscache/                                  Redis 缓存、计数或会话适配
 │   │   └── testkit/                                     该模块测试所需的替身与夹具
-│   ├── config/                                          启动配置加载、默认值、规范化和校验
+│   ├── bstats/                                          安装统计设置、持久实例标识和官方上报调度
+│   │   └── provider/                                    bStats HTTPS 协议与系统信息采集
+│   ├── config/                                          版本化配置升级、加载、显式引用、默认值和校验
 │   ├── creative/                                        创作台任务、临时素材、结果交付和资金恢复
 │   │   ├── httpapi/                                     HTTP 路由、鉴权接入与输入输出适配
 │   │   ├── postgres/                                    PostgreSQL 持久化及事务适配
@@ -141,7 +148,7 @@ backend/
 │   │   ├── httpapi/                                     MCP 传输、管理页面 API 和既有管理路由分发
 │   │   └── rediscache/                                  原子确认状态与加密临时文件
 │   ├── identity/                                        用户、登录身份、会话、强认证和绑定
-│   │   ├── authconfig/                                  登录配置值、地址与钉钉配置解析
+│   │   ├── authconfig/                                  登录配置值、地址、钉钉配置与微信模式/Scope 规则
 │   │   ├── contact/                                     邮箱规范化等联系方式纯规则
 │   │   ├── httpapi/                                     HTTP 路由、鉴权接入与输入输出适配
 │   │   │   ├── authctx/                                 已认证用户、会话和角色的 HTTP 上下文
@@ -315,6 +322,7 @@ backend/
 │       ├── identity/                                    用户、登录身份、会话、强认证和绑定集成测试
 │       ├── identityhttp/                                身份 HTTP 集成测试
 │       ├── maintenance/                                 备份与系统维护集成测试
+│       ├── mcp/                                         MCP 管理输出与业务 DTO 的跨模块测试
 │       ├── migrations/                                  数据库迁移集成测试
 │       ├── payment/                                     外部支付订单、渠道、履约与退款集成测试
 │       ├── pricing_contract/                            跨模块定价集成测试
@@ -411,6 +419,8 @@ flowchart TB
 <a id="management_collaboration"></a>
 ## 管理与后台协作
 
+索引来源和缓存由 `plugin.CatalogService` 协调，HTTPS 验签由 `plugin/provider.IndexClient` 执行；插件安装和完整版本回滚由 `plugin.Manager` 串行协调，`plugin/postgres` 保存完整版本快照，`plugin/provider.Processes` 持有进程；app 在独立生命周期阶段异步恢复和停止。运行时是单实例组件，不依赖 Redis 协调；`plugin` 核心只引用 SDK 的声明、索引和协议契约，进程与文件实现留在 provider。详细规则见[插件系统](plugin_system.md)。
+
 ```mermaid
 flowchart TB
     admin["settings/httpapi"] -. "综合更新" .-> composite["settings/composite"]
@@ -425,7 +435,7 @@ flowchart TB
     ops -. "预聚合控制" .-> pre
 ```
 
-app/lifecycle 管理这些组件的启动和关闭。audit 独立记录操作审计，idempotency 协调面板写命令，backup 与 ops/maintenance 管理备份、恢复及系统更新；它们的等待与关闭顺序见[系统架构](system_architecture.md#startup_and_shutdown)。设置提交后的应用失败、邮件投递的不确定结果和各模块的多实例限制由相应专题说明。
+app/lifecycle 管理这些组件的启动和关闭。audit 独立记录操作审计，idempotency 协调面板写命令，backup 与 ops/maintenance 管理备份、恢复及系统更新；它们的等待与关闭顺序见[系统架构](system_architecture.md#startup_and_shutdown)。设置提交后的应用失败、邮件投递的不确定结果和各模块的并发与恢复限制由相应专题说明。
 
 模型广场的 `routing/postgres/group_availability.go` 读取被动聚合，并调用 `ops/monitor` 的同一健康评分函数；这项依赖按文件许可，HTTP DTO 由 routing 自己维护。历史桶先合并组内计数和时延直方图，再计算整体与各桶的健康，公开读取不调用上游测试。
 
@@ -453,6 +463,7 @@ app/lifecycle 管理这些组件的启动和关闭。audit 独立记录操作审
 | backup | [备份与恢复](../operations/deployment_and_migrations.md#maintenance_execution) |
 | intelligence | [智商测试](../domains/intelligence_tests.md) |
 | remotepool | [远端号池](../interfaces/remote_account_pool.md) |
+| bstats | [bStats 安装统计](../interfaces/configuration.md#bstats_reporting)、[生命周期](system_architecture.md#startup_and_shutdown) |
 | settings、site | [配置](../interfaces/configuration.md)、[HTTP 与页面权限](../interfaces/http_api.md) |
 | idempotency | [面板命令幂等](../interfaces/http_api.md#write_idempotency) |
 | infra、pkg、testutil、cmd、ent、migrations、tests、scripts | [系统架构](system_architecture.md)、[开发验证](../operations/development_workflow.md)、[部署迁移](../operations/deployment_and_migrations.md) |

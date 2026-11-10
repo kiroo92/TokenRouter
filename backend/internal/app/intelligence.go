@@ -53,5 +53,5 @@ func provideIntelligence(db *sql.DB, keys apikey.APIKeyRepository, groups routin
 			return nil
 		},
 	})
-	return intelligencehttp.ProvideIntelligenceHandler(service, cfg.JWT.Secret, users, enabled)
+	return intelligencehttp.ProvideIntelligenceHandler(service, cfg.Auth.JWT.Secret, users, enabled)
 }

@@ -191,6 +191,23 @@ export default {
         enabled: 'Show subscription entries',
         hint: 'When off, hide subscription menus, the purchase tab, and renewal buttons. Balance top-ups and existing subscriptions remain available.',
       },
+      bstats: {
+        title: 'bStats',
+        description:
+          'Send basic runtime information to bStats to help understand TokenRouter adoption and version distribution and guide future improvements. Enabled by default; you can turn it off at any time.',
+        enabled: 'Enable bStats',
+        dataHint:
+          'Reports a random instance ID, operating system and version, architecture, CPU core count, and TokenRouter and Go versions. bStats derives the country from the reporting connection. No accounts, API keys, prompts, requests, usage, or payment data are sent.',
+        viewStatistics: 'View public statistics',
+        logErrors: 'Log reporting errors',
+        logErrorsHint: 'Write failed reporting attempts to the server log. Disabled by default.',
+        logSentData: 'Log submitted data',
+        logSentDataHint:
+          'Write the submitted JSON to the server log, including the persistent instance UUID. Disabled by default.',
+        logResponse: 'Log bStats responses',
+        logResponseHint:
+          'Write successful bStats response content to the server log. Disabled by default.',
+      },
       team: {
         title: 'Team Features',
         description: 'Control whether team pages are available to users and administrators.',
@@ -303,7 +320,7 @@ export default {
       totp: 'Two-Factor Authentication (2FA)',
       totpHint: 'Allow users to use authenticator apps like Google Authenticator',
       totpKeyNotConfigured:
-        'Please configure TOTP_ENCRYPTION_KEY in environment variables first. Generate a key with: openssl rand -hex 32',
+        'Configure security.secret_encryption_key in config.yaml first. Generate a key with: openssl rand -hex 32',
     },
     security: {
       stepUp: 'Step-up 2FA for Sensitive Operations',
@@ -422,7 +439,7 @@ export default {
         'Choose which client IP is used by API Key allowlists/denylists, admin audit logs, and session IP/UA binding',
       trustForwardedIp: 'Trust forwarded client IP',
       trustForwardedIpHint:
-        'Enabled by default for upgrade compatibility. When enabled, raw CF-Connecting-IP, X-Real-IP, or X-Forwarded-For values take over server.trusted_proxies for client-IP resolution. Disable it to enforce the Gin trusted-proxy chain configured by server.trusted_proxies. Only enable takeover mode when the origin cannot be reached directly. Changing this switch changes existing session IP fingerprints.',
+        'Enabled by default for upgrade compatibility. When enabled, raw CF-Connecting-IP, X-Real-IP, or X-Forwarded-For values take over server.client_ip.trusted_proxies for client-IP resolution. Disable it to enforce the Gin trusted-proxy chain configured by server.client_ip.trusted_proxies. Only enable takeover mode when the origin cannot be reached directly. Changing this switch changes existing session IP fingerprints.',
       forwardedClientIpHeaders: 'Custom client-IP headers',
       forwardedClientIpHeadersHint:
         'Add CDN or proxy header names to check before the built-in headers.',
@@ -729,7 +746,7 @@ export default {
       ttftModeFirstEvent: 'First upstream event',
       ttftModeFirstOutput: 'First useful output',
       ttftModeHint:
-        'Applies to all text streaming platforms and protocols, measured from the upstream attempt start. Changes affect new requests; TPS always uses the useful-content interval.',
+        'Applies to all text streaming platforms and protocols, measured from the upstream attempt start. Changes affect new requests. TPS is independent of this setting and measures average output speed from the upstream call start to its last useful content.',
       fingerprintUnification: 'Fingerprint Unification',
       fingerprintUnificationHint:
         "Unify X-Stainless-* headers across users sharing the same OAuth provider. Disabling passes through each client's original headers.",
@@ -829,6 +846,16 @@ export default {
       testNoResults: 'No results found',
     },
     site: {
+      socialSharing: 'Social sharing',
+      socialSharingHint:
+        'Use this title, description, and cover for Twitter Card and Open Graph previews.',
+      shareTitleHint:
+        'Leave blank to use the homepage title, or the site name when no title is set.',
+      shareDescriptionHint: 'Leave blank to use the site subtitle.',
+      shareCover: 'Share cover',
+      shareCoverHint:
+        'PNG, JPEG, or WebP, up to 2 MiB and 4096 × 4096 pixels. Suggested size: 1200 × 630. Published when you save settings. Social platforms may cache earlier previews.',
+
       title: 'Site Settings',
       description: 'Customize site branding',
       backendMode: 'Backend Mode',
@@ -864,7 +891,7 @@ export default {
       clientProviderIdError:
         'Client provider ID must start with a lowercase letter and contain 1 to 64 lowercase letters, digits, underscores, or hyphens.',
       apiBaseUrlHint:
-        'Used for "Use Key", "Import to CC Switch", and callback URL suggestions. Leave empty to use current site URL.',
+        'Used for "Use Key" and "Import to CC Switch". Leave empty to use current site URL.',
       tablePreferencesTitle: 'Global Table Preferences',
       tablePreferencesDescription:
         'Configure default pagination behavior for shared table components',
@@ -1026,9 +1053,9 @@ export default {
       providerWxpay: 'WeChat Pay (Direct)',
       providerStripe: 'Stripe',
       providerAirwallex: 'Airwallex',
-      providerEPUSDT: 'EPUSDT / GMPay',
+      providerEPUSDT: 'EPUSDT / GMPay (EPay protocol)',
       field_epusdtApiBaseHint:
-        'Enter your deployed epusdt HTTPS URL, such as https://pay.example.com. Use the merchant API key secret for payment requests.',
+        'Enter the EPUSDT HTTPS base URL, such as https://pay.example.com. Uses the EPay submit.php flow with MD5 signatures and the merchant API key secret.',
       typeDisabled: 'type disabled',
       enableTypesFirst: 'Enable at least one payment type above first',
       easypayRedirect: 'Redirect',

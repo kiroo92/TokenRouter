@@ -1,0 +1,65 @@
+{
+  "name": "@tokenflux/tokenrouter-plugin-sdk",
+  "version": "0.3.0",
+  "description": "TokenRouter plugin frontend contracts and build preset",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@12.9.1",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.js"
+    },
+    "./dev": {
+      "types": "./dist/dev/index.d.ts",
+      "import": "./dist/dev/index.js"
+    }
+  },
+  "scripts": {
+    "format": "prettier --config ../prettier.config.mjs --write 'src/**/*.ts' 'tests/**/*.{mjs,ts,vue,json}' '*.json'",
+    "format:check": "prettier --config ../prettier.config.mjs --check 'src/**/*.ts' 'tests/**/*.{mjs,ts,vue,json}' '*.json'",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm build && vue-tsc -p tests/fixtures/consumer/tsconfig.json && node --test tests/*.test.mjs"
+  },
+  "peerDependencies": {
+    "vite": "^8.3.2",
+    "vue": "^3.5.42"
+  },
+  "dependencies": {
+    "css-tree": "3.2.1",
+    "postcss": "8.5.29",
+    "postcss-selector-parser": "7.1.6"
+  },
+  "devDependencies": {
+    "@types/css-tree": "3.2.0",
+    "@types/node": "26.6.4",
+    "@vitejs/plugin-vue": "6.0.9",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "vite": "8.3.2",
+    "vue": "3.5.42",
+    "vue-tsc": "3.3.12"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TokenFlux/TokenRouter.git",
+    "directory": "plugin-sdk/web"
+  },
+  "homepage": "https://github.com/TokenFlux/TokenRouter/tree/main/docs/guides/plugins",
+  "bugs": {
+    "url": "https://github.com/TokenFlux/TokenRouter/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

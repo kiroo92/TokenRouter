@@ -783,6 +783,13 @@
                 :hint="t('admin.providers.openai.flattenNamespacesDesc')"
                 testid="edit-openai-flatten-namespaces-toggle"
               />
+              <SettingToggleRow
+                v-if="provider.type === 'oauth' || provider.type === 'apikey'"
+                id="edit-openai-images-gif"
+                v-model="openAIImagesGIFEnabled"
+                :label="t('admin.providers.openai.imagesGIFEnabled')"
+                :hint="t('admin.providers.openai.imagesGIFEnabledDesc')"
+              />
               <template v-if="provider.type === 'apikey'">
                 <SettingToggleRow
                   id="edit-openai-continuation-supported"
@@ -861,6 +868,24 @@
             </SettingsSection>
 
             <CodexImageToolModeSelector v-model="codexImageToolMode" />
+            <SettingsSection v-if="provider?.type === 'oauth'">
+              <SettingRow
+                id="edit-image-responses-model"
+                label-for="edit-image-responses-model-input"
+                :label="t('admin.providers.openai.imageResponsesModel')"
+                :hint="t('admin.providers.openai.imageResponsesModelDesc')"
+                field
+              >
+                <input
+                  id="edit-image-responses-model-input"
+                  v-model="codexImageResponsesModel"
+                  data-testid="edit-image-responses-model-input"
+                  type="text"
+                  class="input"
+                  :placeholder="t('admin.providers.openai.imageResponsesModelDefault')"
+                />
+              </SettingRow>
+            </SettingsSection>
 
             <ResponsesWSConnectionModeSelector
               v-if="upstreamProtocols?.includes('openai_responses_websocket')"
@@ -1184,12 +1209,14 @@ const {
   openAICompactMode,
   openAINativeCompactionV2Mode,
   openAIResponsesContinuationSupported,
+  openAIImagesGIFEnabled,
   openAIImagesURLToB64JSON,
   responsesWSConnectionMode,
   codexCLIOnlyAllowClaudeCodeEnabled,
   openAIOAuthClientPolicy,
   codexFingerprintMode,
   codexImageToolMode,
+  codexImageResponsesModel,
   anthropicPassthroughEnabled,
   anthropicAPIKeyAuthScheme,
   webSearchEmulationMode,

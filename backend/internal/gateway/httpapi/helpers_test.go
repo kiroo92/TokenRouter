@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -55,6 +56,7 @@ import (
 	"github.com/TokenFlux/TokenRouter/internal/infra/httpclient"
 	"github.com/TokenFlux/TokenRouter/internal/infra/httpclient/tlsfingerprint"
 	"github.com/TokenFlux/TokenRouter/internal/infra/telemetry/logging"
+	"github.com/TokenFlux/TokenRouter/internal/infra/telemetry/timing"
 	catalogtestkit "github.com/TokenFlux/TokenRouter/internal/modelcatalog/testkit"
 	"github.com/TokenFlux/TokenRouter/internal/moderation"
 	"github.com/TokenFlux/TokenRouter/internal/ops"
@@ -3556,4 +3558,23 @@ func (p *diagnosticHTTPTransport) Do(req *http.Request, _ string, id int64, _ in
 // DoWithTLS reuses fixture dispatch while leaving fingerprint behavior outside this probe.
 func (p *diagnosticHTTPTransport) DoWithTLS(req *http.Request, proxy string, id int64, n int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	return p.Do(req, proxy, id, n)
+}
+
+// runSSEKeepaliveTest installs the real timing and heartbeat middleware for one request.
+// The callback executes inside a virtual-time bubble; it must synchronize worker
+// quiescence before inspecting the recorder while the handler is still active.
+func runSSEKeepaliveTest(t *testing.T, p protocol.ProtocolID, ua string, stream bool, stall time.Duration, handle func(*testing.T, *gin.Context, *httptest.ResponseRecorder)) {
+	t.Helper()
+	synctest.Test(t, func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		engine := gin.New()
+		engine.POST("/v1/messages", TextRequestTiming(), DownstreamSSEKeepalive(10*time.Millisecond, stall), func(c *gin.Context) {
+			c.Request = c.Request.WithContext(requeststate.WithClientProtocol(c.Request.Context(), p))
+			timing.StagesFromContext(c.Request.Context()).SetStream(stream)
+			handle(t, c, rec)
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+		req.Header.Set("User-Agent", ua)
+		engine.ServeHTTP(rec, req)
+	})
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# build_image.sh builds the repository's application image with the shared
-# Dockerfile and tags it for kiroo92's GHCR package. Local builds use the same
-# image name as the deployment templates and the release workflow.
+# build_image.sh builds the complete application image from the repository
+# root. It supplies the configured Go module proxy and checksum database to
+# the shared Dockerfile, then tags the result for local deployment or testing.
 
 set -euo pipefail
 

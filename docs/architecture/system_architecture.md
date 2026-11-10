@@ -1,6 +1,6 @@
 # 系统架构
 
-本文说明单个应用实例的组件、依赖装配、启停顺序和数据归属。包职责和依赖图见[后端模块地图](backend_modules.md)，单次请求的处理顺序见[网关请求生命周期](gateway_request_lifecycle.md)。
+本文说明 TokenRouter 单实例部署的组件、依赖装配、启停顺序和数据归属。包职责和依赖图见[后端模块地图](backend_modules.md)，单次请求的处理顺序见[网关请求生命周期](gateway_request_lifecycle.md)。
 
 ## 章节导航
 
@@ -9,12 +9,12 @@
 - [启动与关闭](#启动与关闭)：修改初始化、后台服务或资源释放时读取。
 - [数据归属](#数据归属)：PostgreSQL、Redis 和对象存储各存什么。
 - [HTTP 与前端交付](#http-与前端交付)：修改 server、路由或嵌入式前端时读取。
-- [多实例与故障处理](#多实例与故障处理)：修改锁、缓存或降级策略时读取。
+- [单实例部署与故障处理](#deployment_and_failures)：修改部署、锁、缓存或降级策略时读取。
 - [备份与系统维护装配](#backup_and_maintenance)：修改备份、系统操作或精简初始化的装配时读取。
 
 ## 运行组件
 
-发布形态以一个 Go 应用进程为中心。这个进程同时提供面板 API、AI 网关、支付回调、健康检查和多种后台任务；使用 `embed` 构建标签时还提供 Vue SPA。正常运行需要外部的 PostgreSQL 和 Redis，大对象和导出文件按功能存到本地数据目录或 S3 兼容存储。
+TokenRouter 部署一个 Go 后端进程和一个 Vue 前端实例，前后端作为同一版本整体升级。后端同时提供面板 API、AI 网关、支付回调、健康检查和多种后台任务；使用 `embed` 构建标签时还提供 Vue SPA。正常运行需要外部的 PostgreSQL 和 Redis，大对象和导出文件按功能存到本地数据目录或 S3 兼容存储。
 
 ```text
 浏览器 / AI 客户端 / 支付回调
@@ -74,14 +74,14 @@ MCP 与普通管理 HTTP 共用业务 handler。app 装配专用令牌读取、R
 
 `app/http_transport.go` 把传输相关配置整理给下游，`gateway/provider/transport` 组合请求策略和各平台的传输能力。`infra/httpclient.UpstreamPool` 持有客户端缓存和请求占用计数，成功的请求在响应体关闭时归还占用。OpenAI 的 HTTP/2 回退由 egress 处理，Grok CLI Header 和可重放的 403 策略由 upstream/grok 处理。隐私请求使用共享的 req 客户端池，超时 30 秒，使用 Chrome 指纹。
 
-`cmd/server` 负责参数解析、构建版本变量和 `go generate ./cmd/server` 入口。配置只加载一次，日志、数据库引导和应用依赖图共用这份配置；JWT secret 在数据库引导后补齐，然后重新校验配置。修改 Wire provider 后通过这个生成入口更新结果；只改装配时无需运行 Ent 生成。
+`cmd/server` 负责参数解析、构建版本变量和 `go generate ./cmd/server` 入口。配置只加载一次，先执行文件版本升级、未知键检查和显式环境引用解析，日志、数据库引导和应用依赖图共用结果；JWT secret 在数据库引导后补齐，然后重新校验配置。`app/upstream_identity.go` 在依赖图构造前发布 Anthropic、Antigravity 和 Grok 的启动身份参数。修改 Wire provider 后通过这个生成入口更新结果；只改装配时无需运行 Ent 生成。
 
 <a id="startup_and_shutdown"></a>
 ## 启动与关闭
 
 ### 启动顺序
 
-主入口先处理 `-version` 和 `-setup`：前者输出构建信息后退出，后者执行命令行安装。正常启动时，尚未安装就执行 AUTO_SETUP 或启动独立的 setup server，已经配置好就构造完整应用。setup 里的迁移调用精简版 bootstrap，业务 worker 留到完整应用启动后再构造。
+主入口先处理 `-version`、`-migrate-config` 和 `-setup`，分别用于构建信息、离线配置迁移和命令行安装。正常启动时，尚未安装就执行 AUTO_SETUP 或启动独立的 setup server，已经配置好就构造完整应用。setup 里的迁移调用精简版 bootstrap，业务 worker 留到完整应用启动后再构造。
 
 完整应用启动时：
 
@@ -111,7 +111,13 @@ Wire 构造完对象、登记完资源后，lifecycle 才启动后台工作，�
 
 提供商的 `BalanceAlertMonitor` 由 app 绑定查询服务、PostgreSQL 运行状态和通知发送。它在 StartOrder 980 启动，在 StopOrder 20 取消并等待检查、发信和结果落库结束，结果落库在取消后仍有独立的五秒预算；随后 StopOrder 25 关闭共享上游查询。提醒运行状态属于备份的 `runtime_data` 选项。
 
-billing 的余额和 Key 缓存队列、订阅过期提醒由 app 接入生命周期。提醒任务启动后立即执行第一轮，之后每分钟扫描一次，用 Redis 或数据库选出 leader；停止时取消并等待正在执行的操作。
+billing 的余额和 Key 缓存队列、订阅过期提醒由 app 接入生命周期。提醒任务启动后立即执行第一轮，之后每分钟扫描一次，执行前取得 Redis 或数据库任务锁；停止时取消并等待正在执行的操作。
+
+### bStats 生命周期
+
+`app/runtime_bstats.go` 构造唯一的 bStats 服务和专用 HTTP 客户端，以构建版本标记 TokenRouter 版本，在 StartOrder 980 启动、StopOrder 20 停止。构造阶段不采集或发送数据，只有读取有效设置并持久保存实例 UUID 后才启动计时器。统计初始化失败允许应用继续启动；关闭时取消并等待上报，再释放设置和日志资源。
+
+综合设置提交后把四项已保存的控制发布给同一服务。关闭和重新开启串行切换 worker，日志更新只替换快照，避免重置官方上报时序。调度、数据范围和默认值见 [bStats 安装统计](../interfaces/configuration.md#bstats_reporting)。
 
 智商测试由 `app/intelligence.go` 装配，在 StartOrder 980 启动两个工作者，并在 StopOrder 20 取消后等待本地生成、远端评价及结果写回。共享 SQL 在工作者结束后关闭；任务凭远端 ID 和 PostgreSQL 租约恢复，详见[智商测试](../domains/intelligence_tests.md)。
 
@@ -126,6 +132,8 @@ SIGINT、SIGTERM、监听失败和 Linux 上的手动重启走同一个关闭流
 5. 关闭订阅、时间轮、空闲 HTTP 连接、Redis、Ent/SQL 和日志文件。
 
 `OpenAILiveObservers` 在阶段 5 停止，Responses WS 设置刷新在阶段 9 停止，`OpenAIWSConnections` 在阶段 10 关闭。
+
+`PluginCatalog` 在启动顺序 974 确保内置索引来源，后台刷新归属此组件并在停止阶段 27 取消、等待返回。`PluginKV` 在启动顺序 975 登记采样与过期清理。`PluginRuntime` 在启动顺序 976 异步恢复持久化安装及显式开发目录，在停止阶段 27 取消定时任务、排空并终止插件进程，预算为 8 秒；KV 维护同阶段停止。插件回调依赖的共享服务在之后关闭；进程代次与租约规则见[插件系统](plugin_system.md#leases_and_callbacks)。
 
 请求跟踪包装的是 Handler，ResponseWriter 原样交给下游，Flush 和 Hijack 仍然可用。有些 handler 在客户端断开后还要继续收集用量，它们完成后请求清理才算结束。异步额度写入、通知、探针和快照任务在使用方一侧通过完成接口登记，它们的 context、并发数和参数取值时机保持各自的设计。每一层关闭后，先等这一层派生出的副作用完成，再关闭下一层依赖。
 
@@ -158,8 +166,8 @@ Live 观察：停止时只关闭本地资源，远端会话的状态以远端为
 | 存储 | 存什么、怎么用 | 失败或丢失的影响 |
 | --- | --- | --- |
 | PostgreSQL | 用户、身份、团队、Key、分组、价格配置、提供商、设置、订单、订阅、持久任务、用量和审计的主数据 | 连接、迁移或密钥初始化失败时，完整应用无法启动；写入失败时如实返回失败 |
-| Redis | 缓存、限流、并发槽、会话和粘性、分布式锁、调度快照、队列和跨实例失效；少数短期任务按 TTL 存在 Redis | 影响因功能而异：安全入口可以直接拒绝请求，调度可以按设计回源，缓存可以重建，在途的短期任务可能丢失；每个功能的具体行为写在对应文档里 |
-| 本地数据目录 | 定价快照、日志、前端覆盖文件和部分部署配置 | 多实例之间默认不共享；容器部署需要挂载持久卷，并在备份计划里列出 |
+| Redis | 缓存、限流、并发槽、会话和粘性、任务锁、调度快照、队列和缓存失效通知；少数短期任务按 TTL 存在 Redis | 影响因功能而异：安全入口可以直接拒绝请求，调度可以按设计回源，缓存可以重建，在途的短期任务可能丢失；每个功能的具体行为写在对应文档里 |
+| 本地数据目录 | 定价快照、日志、前端覆盖文件和部分部署配置 | 属于当前部署，升级时需要保留；容器部署需要挂载持久卷，并在备份计划里列出 |
 | S3 兼容存储 | 备份等可选大对象 | 备份客户端每次按运行时设置构造，修改凭据后立即生效；对象的可用性需要和数据库里的元数据同步管理 |
 | Google Cloud Storage | Vertex 批量图片的输入、输出和中间 JSONL | 由 Vertex 批量图片 provider 按作业前缀管理；内部 URI 对 API 用户隐藏 |
 | 创作台临时数据 | Redis 的 `creative:payload:`、`creative:input:`、`creative:mask:`、`creative:output:` 键（TTL 默认 30 分钟）和 `creative:queue:*` 队列；PostgreSQL 的 `creative_runs`、`creative_run_outputs` 元数据和 `creative_run_outbox` 持久动作 | 素材和 prompt 明文只存在 Redis，所以也不在数据库备份里；临时输出过期后无法恢复，任务标记为 `result_lost`；客户端确认时先写元数据再删除输出键，删除失败由 reconciler 补做 |
@@ -175,15 +183,17 @@ app 把进程配置整理成 `server.Options`，并提供装配好的全局 midd
 
 Gin engine 的中间件顺序：Recovery、可信代理设置、全局日志、客户端指纹、CORS、CSP、Server-Timing、可选的嵌入前端 middleware。之后注册健康检查、`/api/v1` 面板 API，以及不带面板前缀的网关入口。嵌入前端 middleware 会放行 API 和协议路径。`/models` 既是模型广场页面也是 API，按请求方法、认证信息、查询参数和 `Accept` 头区分。
 
-`embed` 构建从 `backend/internal/web/dist/` 提供静态资源，在 HTML 里注入公开设置和 CSP nonce，`data/public` 下的文件可以覆盖静态文件。非 `embed` 构建不注册 SPA middleware，API 进程可以和 Vite 或外部静态服务器分开部署。
+`embed` 构建从 `backend/internal/web/dist/` 提供静态资源，在 HTML 里注入公开设置和 CSP nonce，`data/public` 下的文件可以覆盖静态文件。社交分享标签在语言缓存之外补齐请求地址，最终 ETag 包含这些地址，具体配置见[社交分享](../interfaces/configuration.md#社交分享)。非 `embed` 构建不注册 SPA middleware，API 进程可以和 Vite 或外部静态服务器分开部署。
 
-## 多实例与故障处理
+<a id="deployment_and_failures"></a>
+## 单实例部署与故障处理
 
-- 数据库迁移用 PostgreSQL advisory lock 串行执行。多个实例可以同时启动，拿到锁的连接执行迁移。
-- 调度快照、认证缓存失效、限流、并发槽和许多 leader 任务靠 Redis 协调。修改 key 命名、TTL 或 Lua 原子操作，会影响所有实例之间的约定。
+- 升级时停止接收新流量，按应用关闭流程停止旧后端，确认在途请求和后台任务已结束，前后端一起切换到目标版本，再启动后端执行迁移和初始化。完成验证后恢复流量；备份和回退要求见[部署与数据库迁移](../operations/deployment_and_migrations.md#升级与恢复)。
+- 数据库迁移保留 PostgreSQL advisory lock，取得锁的连接串行执行迁移。锁保护迁移互斥，不改变单实例整体升级的部署约定。
+- 调度快照、认证缓存失效、限流、并发槽和后台任务使用 Redis 的缓存、原子操作和锁。修改 key 命名、TTL 或 Lua 操作时，需要考虑持久状态、在途任务和升级后的恢复。
 - 存储缓存命中后，运行时资格检查照常执行。调度缓存未就绪或不可信时，按对应服务设计的回源策略处理。
 - 初始化失败分为硬失败和可降级失败。数据库、迁移、最终配置校验和 HTTP server 构造失败会终止启动；远程定价初始化失败时记录警告，改用本地数据。新增降级逻辑时，要说明它会不会放宽认证、计费或 SSRF 防护。
-- 每个实例都构造完整的后台服务；只能由一个实例执行的任务，用各自的数据库锁或 Redis 锁选出执行者。
+- 后台服务由唯一后端的 app 装配并接入生命周期。任务按各自的数据库锁、Redis 锁或进程内运行标记控制并发，失败后的重试和恢复遵循所属模块的规则。
 
 出站、路由和提供商的运行接口分别是 `EgressPolicy`、`RoutePlan` 和 `ProviderSnapshot`。策略和模型配置跨请求使用时，每次提供一份独立副本；候选协议和提供商映射在每次 attempt 使用时重新计算。provider 的刷新协调、管理和用量查询、周期维护和 Deferred 任务由 app 持有并登记停止，egress 的采集监听按需开启。`provider/postgres`、`routing/postgres` 和 `egress/postgres` 各自管理存储，Redis 健康计数和 TLS 缓存放在对应的适配层里；SQL、Redis 和 HTTP 连接池各只有一个技术实例。
 

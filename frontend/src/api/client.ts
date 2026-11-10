@@ -10,6 +10,7 @@ import {
 } from './adminUIRequest'
 import { refreshAuthTokens } from './tokenRefresh'
 import { getAPIBaseURL } from './url'
+import { isPluginApiPath } from './pluginPaths'
 
 /**
  * client.ts configures the browser HTTP client and the interceptors that attach
@@ -19,11 +20,12 @@ import { getAPIBaseURL } from './url'
  * callers can suppress interrupted requests.
  *
  * A GET that completes after a locale switch is replayed through the request
- * interceptor before its result is delivered. A first unauthorized response can
- * refresh and retry with rotated credentials; failed refresh cleanup checks the
+ * interceptor before its result is delivered. A first host authentication failure
+ * can refresh and retry with rotated credentials; failed refresh cleanup checks the
  * captured refresh token and serialized user so an earlier request cannot erase
  * a later session. Authentication-entry failures remain available to their
- * forms.
+ * forms. Marked plugin replies keep their own error semantics and do not change
+ * native session or feature state.
  */
 
 export { buildApiUrl, buildGatewayUrl } from './url'
@@ -75,8 +77,8 @@ apiClient.interceptors.request.use(
       config.headers['Accept-Language'] = getLocale()
     }
 
-    // Attach timezone for all GET requests (backend may use it for default date ranges)
-    if (config.method === 'get') {
+    // Native GET queries receive timezone defaults; plugin endpoints own their query contract and receive only explicitly supplied query values.
+    if (config.method === 'get' && !isPluginApiPath(config.url)) {
       if (!config.params) {
         config.params = {}
       }
@@ -111,6 +113,10 @@ apiClient.interceptors.response.use(
     const requestLocale = response.config?.headers?.['Accept-Language']
     if (response.config?.method === 'get' && requestLocale && requestLocale !== getLocale()) {
       return apiClient.request(response.config)
+    }
+    // Plugin payloads own their field names, so native envelope interpretation must not consume a plugin's ordinary code or data property.
+    if (isPluginApiPath(response.config?.url)) {
+      return response
     }
     // Unwrap standard API response format { code, message, data }
     const apiResponse = response.data as ApiResponse<unknown>
@@ -156,10 +162,14 @@ apiClient.interceptors.response.use(
 
       // Validate `data` shape to avoid HTML error pages breaking our error handling.
       const apiData = (typeof data === 'object' && data !== null ? data : {}) as Record<string, any>
+      // The host proxy attaches this response marker after native authentication;
+      // plugin-owned errors must not rotate host credentials or change native feature flags.
+      const pluginResponse =
+        isPluginApiPath(url) && error.response.headers?.['x-tokenrouter-plugin-response'] === '1'
 
       // Ops monitoring disabled: treat as feature-flagged 404, and proactively redirect away
       // from ops pages to avoid broken UI states.
-      if (status === 404 && apiData.message === 'Ops monitoring is disabled') {
+      if (!pluginResponse && status === 404 && apiData.message === 'Ops monitoring is disabled') {
         try {
           /**
            * Cache the disabled flag before notifying listeners so operations
@@ -187,9 +197,9 @@ apiClient.interceptors.response.use(
         })
       }
 
-      // 401: Try to refresh the token if we have a refresh token
+      // Native 401 responses may refresh the current host session once.
       // This handles TOKEN_EXPIRED, INVALID_TOKEN, TOKEN_REVOKED, etc.
-      if (status === 401 && !originalRequest._retry) {
+      if (!pluginResponse && status === 401 && !originalRequest._retry) {
         const refreshToken = localStorage.getItem('refresh_token')
         const isAuthEndpoint =
           url.includes('/auth/login') ||
@@ -291,12 +301,14 @@ apiClient.interceptors.response.use(
         code: apiData.code,
         reason: apiData.reason,
         error: apiData.error,
-        message: responseErrorMessage(
-          url,
-          apiData.reason,
-          status,
-          apiData.message || apiData.detail || error.message,
-        ),
+        message: pluginResponse
+          ? String(apiData.message || apiData.detail || error.message)
+          : responseErrorMessage(
+              url,
+              apiData.reason,
+              status,
+              apiData.message || apiData.detail || error.message,
+            ),
         request_id: error.response?.headers?.['x-request-id'],
         metadata: apiData.metadata,
       })

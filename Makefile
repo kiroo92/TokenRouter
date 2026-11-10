@@ -20,6 +20,8 @@ INTEGRATION_PKGS = $(shell cd backend && grep -rlE '^//go:build integration$$' -
 	test test-go test-frontend test-frontend-tools test-integration test-embed test-scripts test-installer test-tools test-e2e \
 	check verify security security-go security-frontend hooks
 
+.PHONY: prepare-plugin-sdk-web lint-plugin-sdk test-plugin-sdk plugin-proto-check fmt-plugin-sdk fmt-plugin-sdk-check
+
 # build packages frontend assets before compiling the server that embeds those assets.
 build: build-frontend
 	cd backend && CGO_ENABLED=0 go build -tags=embed -trimpath -o bin/server ./cmd/server
@@ -39,10 +41,10 @@ generate:
 # Go formatting selects changed files and honors BASE; frontend formatting covers
 # every handwritten file selected by its configuration and resource exclusions.
 # fmt applies the formatters for both repository implementation languages.
-fmt: fmt-go fmt-frontend
+fmt: fmt-go fmt-frontend fmt-plugin-sdk
 
 # fmt-check checks Go selection and all included frontend source files.
-fmt-check: fmt-go-check fmt-frontend-check
+fmt-check: fmt-go-check fmt-frontend-check fmt-plugin-sdk-check
 
 # fmt-go formats changed handwritten Go files through the repository selector.
 fmt-go:
@@ -61,7 +63,7 @@ fmt-frontend-check:
 	$(PNPM) run format:check
 
 # lint runs static verification for both backend and frontend source.
-lint: lint-go lint-frontend
+lint: lint-go lint-frontend lint-plugin-sdk
 
 # lint-go checks architecture and Go sources with the integration build tag.
 # This includes ordinary and integration files; test-embed covers embedded-resource files.
@@ -76,7 +78,35 @@ lint-frontend:
 	$(PNPM) run typecheck
 
 # test runs the default backend and frontend regression suites.
-test: test-go test-frontend
+test: test-go test-frontend test-plugin-sdk
+
+# prepare-plugin-sdk-web installs the SDK's frozen graph without requiring host UI dependencies.
+prepare-plugin-sdk-web:
+	pnpm --dir plugin-sdk/web install --frozen-lockfile
+
+# lint-plugin-sdk checks the independent Go module and the public frontend contract.
+lint-plugin-sdk: prepare-plugin-sdk-web
+	cd plugin-sdk/go && bash ../../tools/golangci-lint.sh run ./...
+	pnpm --dir plugin-sdk/web run format:check
+	pnpm --dir plugin-sdk/web run typecheck
+
+# test-plugin-sdk exercises protocol, process fixtures, publication, and frontend bundling.
+test-plugin-sdk: prepare-plugin-sdk-web
+	cd plugin-sdk/go && go test ./...
+	pnpm --dir plugin-sdk/web test
+
+# plugin-proto-check regenerates committed bindings and rejects any resulting drift.
+plugin-proto-check:
+	$(MAKE) -C plugin-sdk/go proto
+	git diff --exit-code -- plugin-sdk/go/pluginpb plugin-sdk/go/proto
+
+# fmt-plugin-sdk formats SDK web source and the minimal consumer test fixtures.
+fmt-plugin-sdk:
+	pnpm --dir plugin-sdk/web run format
+
+# fmt-plugin-sdk-check verifies SDK web formatting without rewriting author source files.
+fmt-plugin-sdk-check:
+	pnpm --dir plugin-sdk/web run format:check
 
 # test-go runs backend tests selected by the default build tags.
 test-go:
@@ -105,7 +135,9 @@ test-embed:
 
 # test-scripts verifies deployment shell syntax and platform-compatible script fixtures.
 test-scripts:
-	/bin/bash -n deploy/apple-container.sh deploy/install.sh
+	@for script in deploy/*.sh deploy/tests/*.sh deploy/tests/fixtures/bin/*; do \
+		/bin/bash -n "$$script" || exit 1; \
+	done
 	/bin/bash deploy/tests/install-github-token-test.sh
 	/bin/bash deploy/tests/apple-container-test.sh
 	/bin/sh deploy/tests/docker-compose-security-test.sh
@@ -113,7 +145,7 @@ test-scripts:
 	/bin/sh deploy/tests/docker-compose-variants-test.sh
 	/bin/sh deploy/tests/docker-compose-gateway-env-test.sh
 	/bin/sh deploy/tests/docker-runtime-resources-test.sh
-	/bin/sh deploy/test-caddyfile-cache.sh
+	/bin/sh deploy/tests/caddyfile-cache-test.sh
 	/bin/sh tools/goreleaser_prebuilt_test.sh
 
 # test-installer runs installer fixtures in Linux with Bash 4 and sha256sum.
@@ -126,6 +158,7 @@ test-installer:
 # fixtures invoke the pinned golangci-lint installation used by normal repository commands.
 test-tools:
 	python3 -m unittest discover -s tools -p 'test_*.py'
+	python3 -m unittest discover -s .agents/skills/tr-release/scripts -p 'test_*.py'
 	cd tools/declorder && GOWORK=off go test ./...
 
 # test-e2e connects to a running service using addresses and credentials from
@@ -141,17 +174,24 @@ check:
 # verify runs the CI acceptance targets locally and requires Docker services.
 verify: lint test-tools test test-integration build test-embed test-scripts test-installer
 
-# security checks both dependency graphs against current vulnerability reports.
+# security checks application and plugin SDK dependencies against current reports.
 security: security-go security-frontend
 
-# security-go scans backend dependencies with the pinned govulncheck tool.
+# security-go checks the backend and Go plugin SDK with the pinned govulncheck tool.
+# Each module is scanned from its own directory so SDK-only packages and dependency
+# versions are included.
 security-go:
 	cd backend && go run golang.org/x/vuln/cmd/govulncheck@$$(cat ../.govulncheck-version) ./...
+	cd plugin-sdk/go && go run golang.org/x/vuln/cmd/govulncheck@$$(cat ../../.govulncheck-version) ./...
 
-# security-frontend installs the frozen graph and verifies audit exceptions.
+# security-frontend installs and audits frontend and Web SDK production dependencies.
+# Frontend findings use the repository exception list; high and critical SDK
+# findings fail directly because frontend mitigations do not establish SDK safety.
 security-frontend:
 	$(PNPM) install --frozen-lockfile
 	python3 tools/check_pnpm_audit_exceptions.py --run --exceptions .github/audit-exceptions.yml
+	pnpm --dir plugin-sdk/web install --frozen-lockfile
+	pnpm --dir plugin-sdk/web audit --prod --audit-level=high
 
 # hooks enables repository pre-push checks for this local checkout.
 hooks:

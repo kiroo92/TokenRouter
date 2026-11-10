@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// epusdt_scenario_test.go checks the merchant and fiat identity retained by GMPay
+// epusdt_scenario_test.go checks the merchant and fiat identity retained by EPUSDT EPay
 // orders. Configuration masking, fee availability, and transaction-reference
 // checks protect the common payment runtime when cryptocurrency checkout
 // joins the existing provider registration and fulfillment paths.

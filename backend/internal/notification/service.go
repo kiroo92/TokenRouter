@@ -28,8 +28,9 @@ import (
 // and coordinates source-backed email delivery.
 // Notification delivery renders event-specific placeholders using recipient
 // language and stored template overrides. HTML variables are escaped except for
-// the operations-report field admitted through a separate trusted map. Optional
-// events additionally consult persisted unsubscribe preferences before sending.
+// the operations-report and escaped plugin-body fields admitted through a trusted
+// map. Optional events additionally consult persisted unsubscribe preferences
+// before sending.
 //
 // A source-backed request coordinates marker lookup, SMTP sending, and marker
 // storage under one instance-local delivery key. Acceptance and persistence are
@@ -47,7 +48,6 @@ const (
 	// rendering and unsubscribe URLs, with a built-in site name for missing copy.
 	defaultSiteName       = "TokenRouter"
 	SettingKeySiteName    = "site_name"
-	SettingKeyAPIBaseURL  = "api_base_url"
 	SettingKeyFrontendURL = "frontend_url"
 
 	// Event identifiers select templates, placeholder rules, preference
@@ -247,6 +247,14 @@ var (
 				append(append([]string{}, notificationEmailOpsSummaryPlaceholders...), "report_detail_display", "report_html")...,
 			),
 		},
+		{
+			Event:        NotificationEmailEventPluginMessage,
+			Label:        "Plugin message",
+			Description:  "Optional message sent by an administrator-installed plugin.",
+			Category:     "plugin",
+			Optional:     true,
+			Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), "plugin_name", "subject", "body_html", "unsubscribe_url"),
+		},
 	}
 
 	// notificationEmailEventDefinitions indexes event metadata for normalized
@@ -286,6 +294,7 @@ var (
 				HTML:    notificationEmailCard("#2563eb", "工单有新回复", `<p>{{recipient_name}}，您好：</p><p>处理人员回复了您的工单 <strong>#{{ticket_id}}：{{ticket_title}}</strong>。</p><p>请登录站点，在工单页面查看并回复。</p><p>{{ticket_url}}</p><p class="muted"><a href="{{unsubscribe_url}}">退订工单邮件通知</a></p>`),
 			},
 		},
+		NotificationEmailEventPluginMessage: pluginMessageTemplates,
 		NotificationEmailEventTeamOwnershipTransfer: {
 			notificationEmailDefaultLocale: {
 				Subject: "[{{site_name}}] Team ownership transfer",
@@ -602,6 +611,9 @@ type (
 
 // NotificationEmailService renders events and coordinates recipient preferences with source-backed delivery markers.
 type NotificationEmailService struct {
+	// frontendURL resolves the public site address on each send. Assembly
+	// installs it before concurrent use; nil uses only the stored frontend_url.
+	frontendURL func(context.Context) string
 	// recipientLocale is installed during assembly and read before stored
 	// language fallbacks. Configure it before concurrent lookups because this field
 	// assignment and its readers are unsynchronized.
@@ -688,6 +700,13 @@ type SendRequest struct {
 	// so rendering does not race with a concurrent write to their input storage.
 	Variables        map[string]string // escaped substitution values
 	RawHTMLVariables map[string]string // trusted HTML substitutions
+}
+
+// SendResult separates known transport acceptance from skipped or unattempted delivery.
+type SendResult struct {
+	// Delivered is true after SMTP acceptance or a retained success marker, even if a later marker write returns an error.
+	Delivered bool
+	Attempted bool // transport sender was invoked
 }
 
 // NotificationEmailUnsubscribeResult identifies the optional event and recipient whose preference was saved.
@@ -1025,33 +1044,41 @@ func (s *NotificationEmailService) PreviewTemplate(ctx context.Context, input No
 }
 
 // @project-doc docs/interfaces/configuration.md#notification_delivery
-// Send renders one event and sends it after preference and source-marker checks.
-// A blank recipient for a supported event returns success, as do an optional-event
-// unsubscribe and an existing delivery marker. Event language precedes recipient
-// preferences, and rendering occurs before keyed delivery admission.
-//
-// When source type and ID are present, one instance-local key serializes current
-// and legacy marker lookup, the send call, and success-marker persistence.
-// Sender failures receive delivery classification. A marker-write failure after
-// successful sending returns the storage error with no compensation: another
-// instance or retry can observe no marker despite transport acceptance.
+// Send renders and delivers one notification through the shared result-aware path.
+// It preserves the error-only interface used by existing business callers. Callers
+// needing to distinguish transport acceptance from later persistence failure use
+// SendWithResult and inspect its Delivered field even when an error is returned.
 func (s *NotificationEmailService) Send(ctx context.Context, input SendRequest) error {
+	_, err := s.SendWithResult(ctx, input)
+	return err
+}
+
+// SendWithResult renders and sends while preserving transport acceptance as a separate result.
+// Blank recipients and unsubscribe decisions return an unattempted, undelivered result.
+// Existing delivery markers return known acceptance without another transport call.
+//
+// Callers inspect Delivered even when an error follows successful SMTP acceptance,
+// because marker persistence cannot undo mail delivery. Attempted distinguishes
+// errors before transport from failures whose delivery outcome may be uncertain.
+// This method retains the same preference checks, keyed coordination, rendering,
+// and marker order as Send so existing callers keep their established behavior.
+func (s *NotificationEmailService) SendWithResult(ctx context.Context, input SendRequest) (SendResult, error) {
 	info, normalizedEvent, err := s.eventInfo(input.Event)
 	if err != nil {
-		return NotificationEmailTemplateErr(err)
+		return SendResult{}, NotificationEmailTemplateErr(err)
 	}
 	recipient := strings.TrimSpace(input.RecipientEmail)
 	if recipient == "" {
-		return nil
+		return SendResult{}, nil
 	}
 	if info.Optional {
 		unsubscribed, err := s.IsUnsubscribed(ctx, recipient, normalizedEvent)
 		if err != nil {
-			return err
+			return SendResult{}, err
 		}
 		if unsubscribed {
 			slog.Info("notification email suppressed by unsubscribe preference", "event", normalizedEvent, "recipient_hash", NotificationEmailHash(recipient))
-			return nil
+			return SendResult{}, nil
 		}
 	}
 
@@ -1059,12 +1086,12 @@ func (s *NotificationEmailService) Send(ctx context.Context, input SendRequest) 
 	ctx = locale.WithLanguage(ctx, selectedLocale)
 	tmpl, err := s.GetTemplate(ctx, normalizedEvent, selectedLocale)
 	if err != nil {
-		return NotificationEmailTemplateErr(err)
+		return SendResult{}, NotificationEmailTemplateErr(err)
 	}
 	variables := s.runtimeVariables(ctx, normalizedEvent, selectedLocale, input)
 	rendered, err := RenderNotificationEmail(normalizedEvent, tmpl.Subject, tmpl.HTML, variables, input.RawHTMLVariables)
 	if err != nil {
-		return NotificationEmailTemplateErr(err)
+		return SendResult{}, NotificationEmailTemplateErr(err)
 	}
 
 	deliveryKey := notificationEmailDeliveryKey(normalizedEvent, input.SourceType, input.SourceID, recipient, input.ReminderKey)
@@ -1073,7 +1100,7 @@ func (s *NotificationEmailService) Send(ctx context.Context, input SendRequest) 
 	if deliveryKey != "" {
 		release, err := s.locks.acquire(ctx, deliveryKey)
 		if err != nil {
-			return err
+			return SendResult{}, err
 		}
 		defer release()
 	}
@@ -1082,27 +1109,29 @@ func (s *NotificationEmailService) Send(ctx context.Context, input SendRequest) 
 	if deliveryKey != "" {
 		sent, err := s.deliveryExists(ctx, deliveryKey, legacyNotificationEmailDeliveryKey(normalizedEvent, input.SourceType, input.SourceID, recipient, input.ReminderKey))
 		if err != nil {
-			return err
+			return SendResult{}, err
 		}
 		if sent {
-			return nil
+			return SendResult{Delivered: true}, nil
 		}
 	}
 
 	if s.emailService == nil {
-		return NotificationEmailConfigErr(errors.New("email service is not configured"))
+		return SendResult{}, NotificationEmailConfigErr(errors.New("email service is not configured"))
 	}
+	result := SendResult{Attempted: true}
 	if err := s.emailService.SendEmail(ctx, recipient, rendered.Subject, rendered.HTML); err != nil {
-		return NotificationEmailDeliveryErr(err)
+		return result, NotificationEmailDeliveryErr(err)
 	}
+	result.Delivered = true
 	// Transport acceptance precedes persistence. Store success only after the send
 	// returns nil; a failure here leaves delivered mail possible even though no current marker was saved.
 	if deliveryKey != "" {
 		if err := s.settingRepo.Set(ctx, deliveryKey, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-			return err
+			return result, err
 		}
 	}
-	return nil
+	return result, nil
 }
 
 // RememberRecipientLocale stores a normalized language hint for the supplied email's hash.
@@ -1231,12 +1260,23 @@ func (s *NotificationEmailService) eventInfo(event string) (NotificationEmailEve
 // sampleVariables returns a fresh localized example map with current site branding.
 // Balance previews resolve the configured units and recharge link, and optional events receive
 // a sample unsubscribe destination when absent. This map initializes previews
-// and runtime rendering; runtimeVariables replaces report-specific samples before delivery.
+// and runtime rendering; runtimeVariables removes unsupplied report and plugin
+// content samples before delivery.
 func (s *NotificationEmailService) sampleVariables(ctx context.Context, event, languageCode string) map[string]string {
 	ctx = locale.WithLanguage(ctx, languageCode)
 	info := notificationEmailEventDefinitions[event]
 	variables := make(map[string]string, len(info.Placeholders))
 	maps.Copy(variables, notificationEmailSampleVariables(languageCode))
+	if event == NotificationEmailEventPluginMessage {
+		variables["plugin_name"] = "Example plugin"
+		variables["subject"] = "Message example"
+		variables["body_html"] = "A message from your plugin."
+		if languageCode == notificationEmailLocaleChinese {
+			variables["plugin_name"] = "示例插件"
+			variables["subject"] = "消息示例"
+			variables["body_html"] = "这是一条来自插件的消息。"
+		}
+	}
 	if event == NotificationEmailEventBalanceLow || event == NotificationEmailEventBalanceRechargeSuccess {
 		variables["balance_unit_name"] = locale.ReadSettingText(ctx, s.settingRepo, "balance_unit_name", "USD")
 		// Missing or unreadable symbol settings use the same dollar default as the
@@ -1261,8 +1301,9 @@ func (s *NotificationEmailService) sampleVariables(ctx context.Context, event, l
 // Operations reports replace missing summary values with dashes and remove an
 // unsupplied sample report body. Missing display controls are inferred from supplied
 // summary-field presence and the detail default, preventing preview metrics from appearing
-// as measured runtime results. Other event samples remain available for any
-// placeholders the business caller did not supply.
+// as measured runtime results. Plugin content samples are cleared before caller
+// substitution. Other event samples remain available for placeholders the business
+// caller did not supply.
 func (s *NotificationEmailService) runtimeVariables(ctx context.Context, event, languageCode string, input NotificationEmailSendInput) map[string]string {
 	ctx = locale.WithLanguage(ctx, languageCode)
 	variables := s.sampleVariables(ctx, event, languageCode)
@@ -1271,6 +1312,12 @@ func (s *NotificationEmailService) runtimeVariables(ctx context.Context, event, 
 	if notificationEmailEventDefinitions[event].Category == "ticket" {
 		for _, key := range []string{"ticket_id", "ticket_title", "ticket_url"} {
 			variables[key] = ""
+		}
+	}
+	if event == NotificationEmailEventPluginMessage {
+		// Preview samples are presentation fixtures; clear them before copying runtime values so omitted plugin content cannot become a real notification.
+		for _, name := range []string{"plugin_name", "subject", "body_html"} {
+			variables[name] = ""
 		}
 	}
 	maps.Copy(variables, input.Variables)
@@ -1329,23 +1376,28 @@ func (s *NotificationEmailService) siteName(ctx context.Context) string {
 	return locale.ReadGroupedText(ctx, s.settingRepo, "site_texts", "site_name", defaultSiteName)
 }
 
-// baseURL returns the first nonblank API base or frontend URL from current settings.
-// Read failures and blank values proceed to the next source, and the selected
-// string is trimmed with trailing slashes removed. Missing service/storage or
-// both unavailable values produces an empty base for relative unsubscribe links.
-func (s *NotificationEmailService) baseURL(ctx context.Context) string {
-	if s == nil || s.settingRepo == nil {
+// @project-doc docs/interfaces/configuration.md#site_link_addresses
+// frontendBaseURL returns the selected public site address without trailing slashes.
+// An installed reader owns stored/deployment precedence, including an empty
+// result. Standalone services read only frontend_url; missing or failed reads
+// leave unsubscribe links relative. API client endpoints never supply this base.
+func (s *NotificationEmailService) frontendBaseURL(ctx context.Context) string {
+	if s == nil {
 		return ""
 	}
-	// Prefer the API base before the frontend base. Failed reads and blank values
-	// leave the next source eligible, and no usable source keeps unsubscribe links relative.
-	for _, key := range []string{SettingKeyAPIBaseURL, SettingKeyFrontendURL} {
-		value, err := s.settingRepo.GetValue(ctx, key)
-		if err == nil && strings.TrimSpace(value) != "" {
-			return strings.TrimRight(strings.TrimSpace(value), "/")
-		}
+	if s.frontendURL != nil {
+		return strings.TrimRight(strings.TrimSpace(s.frontendURL(ctx)), "/")
 	}
-	return ""
+	if s.settingRepo == nil {
+		return ""
+	}
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyFrontendURL)
+	// Standalone mailers have no deployment reader. A failed stored-address read
+	// retains relative links without substituting the unrelated client API endpoint.
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(value), "/")
 }
 
 // buildUnsubscribeURL signs a recipient/event token and appends its escaped value to the endpoint path.
@@ -1359,7 +1411,7 @@ func (s *NotificationEmailService) buildUnsubscribeURL(ctx context.Context, emai
 	// Escape the complete signed token as one query value so payload punctuation
 	// remains within token input when the unsubscribe handler reads the request parameter.
 	path := "/api/v1/settings/email-unsubscribe?token=" + url.QueryEscape(token)
-	baseURL := s.baseURL(ctx)
+	baseURL := s.frontendBaseURL(ctx)
 	// A missing link base leaves an endpoint-relative path available. The renderer
 	// accepts slash-prefixed URL substitutions, so the optional notice can still carry that prepared link.
 	if baseURL == "" {
@@ -1566,7 +1618,7 @@ func RenderNotificationEmail(event, subject, htmlBody string, variables map[stri
 
 // renderNotificationEmailString substitutes recognized event fields using subject or HTML escaping rules.
 // Unknown recognized placeholders return an error; absent ordinary values become
-// empty strings. A trusted raw value is used only for an HTML report field admitted
+// empty strings. A trusted raw value is used only for a report or plugin body field admitted
 // by notificationEmailRawHTMLAllowed.
 //
 // Raw values are selected before ordinary URL and escaping checks. Otherwise,
@@ -1591,7 +1643,8 @@ func renderNotificationEmailString(event, raw string, variables map[string]strin
 			return ""
 		}
 		value := variables[name]
-		// Raw substitution is confined to admitted report-body HTML. Selecting that
+		// Raw substitution is confined to admitted report HTML and the plugin adapter
+		// body that has already escaped every caller-supplied text character. Selecting that
 		// map value here intentionally bypasses the ordinary escaping applied to other template variables.
 		if escapeHTML && notificationEmailRawHTMLAllowed(event, name) {
 			if rawHTMLVariables != nil {
@@ -1618,9 +1671,9 @@ func renderNotificationEmailString(event, raw string, variables map[string]strin
 	return rendered, nil
 }
 
-// notificationEmailRawHTMLAllowed reports whether the operations-report body field admits trusted HTML.
+// notificationEmailRawHTMLAllowed identifies the report and plugin body fields admitting trusted HTML.
 func notificationEmailRawHTMLAllowed(event, placeholder string) bool {
-	return event == NotificationEmailEventOpsScheduledReport && placeholder == "report_html"
+	return (event == NotificationEmailEventOpsScheduledReport && placeholder == "report_html") || (event == NotificationEmailEventPluginMessage && placeholder == "body_html")
 }
 
 // notificationEmailAllowedPlaceholderSet returns a fresh set of declared names for the exact event.
@@ -1660,6 +1713,13 @@ func notificationEmailPlaceholdersIn(raw string) []string {
 // one supported language code for template keys, samples, and remembered preferences.
 func normalizeNotificationLocale(raw string) string {
 	return locale.Negotiate(raw, notificationEmailDefaultLocale)
+}
+
+// SetFrontendURLReader installs the public site address resolver for unsubscribe links.
+// Call during assembly before concurrent sends because assignment is unsynchronized.
+// The reader owns deployment fallback; nil selects standalone stored-setting reads.
+func (s *NotificationEmailService) SetFrontendURLReader(read func(context.Context) string) {
+	s.frontendURL = read
 }
 
 // SetRecipientLocaleReader installs the account-language lookup used before persisted language hints.

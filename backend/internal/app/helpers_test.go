@@ -236,6 +236,9 @@ type gatewayHTTPFixtureInput struct {
 // gatewayHTTPEndpointsFixture exposes bound HTTP entry points and retained
 // inputs for assembly tests.
 type gatewayHTTPEndpointsFixture struct {
+	// textHandler rebuilds the production receiver from retained fixture inputs.
+	// Route tests register this receiver directly to exercise the full middleware chain.
+	textHandler func() *gatewayhttp.OpenAITextHandler
 	// Input points to the constructor's retained input copy; serial tests
 	// change its options before invoking callbacks that rebuild handler
 	// bindings.
@@ -1019,7 +1022,7 @@ func newHTTPCompletionFixture(cfg *config.Config, logs usage.UsageLogRepository,
 	f.Effects.Activity = activity
 	f.Options.DefaultMultiplier = 1
 	if cfg != nil {
-		f.Options.DefaultMultiplier = cfg.Default.RateMultiplier
+		f.Options.DefaultMultiplier = cfg.Billing.FallbackRateMultiplier
 	}
 	return f.Core(nil, openAI)
 }
@@ -1145,6 +1148,7 @@ func newGatewayHTTPEndpoints(input gatewayHTTPFixtureInput) *gatewayHTTPEndpoint
 		bindings.EligibilityProber = nil
 		return mediaentry.New(bindings)
 	}
+	f.textHandler = text
 	f.Responses = func(c *gin.Context) { text().Responses(c) }
 	f.Messages = func(c *gin.Context) { text().Messages(c) }
 	f.ChatCompletions = func(c *gin.Context) { text().ChatCompletions(c) }
@@ -1191,7 +1195,7 @@ func newFundingAdmissionFixture(funds *billing.Eligibility, cfg *config.Config) 
 // from the supplied config. The config must be nonnil when this helper runs,
 // including later reads through the eligibility fixture's options callback.
 func billingEligibilityFixtureOptions(c *config.Config) billing.EligibilityOptions {
-	return billing.EligibilityOptions{Billing: billing.BillingOptions{MinimumBalanceReserve: c.Billing.MinimumBalanceReserve, CircuitBreaker: billing.CircuitBreakerOptions{Enabled: c.Billing.CircuitBreaker.Enabled, FailureThreshold: c.Billing.CircuitBreaker.FailureThreshold, ResetTimeoutSeconds: c.Billing.CircuitBreaker.ResetTimeoutSeconds, HalfOpenRequests: c.Billing.CircuitBreaker.HalfOpenRequests}}}
+	return billing.EligibilityOptions{Billing: billing.BillingOptions{MinimumBalanceReserve: c.Billing.MinimumBalanceReserve, CircuitBreaker: billing.CircuitBreakerOptions{Enabled: c.Billing.BalanceCheckCircuitBreaker.Enabled, FailureThreshold: c.Billing.BalanceCheckCircuitBreaker.FailureThreshold, ResetTimeoutSeconds: c.Billing.BalanceCheckCircuitBreaker.ResetTimeoutSeconds, HalfOpenRequests: c.Billing.BalanceCheckCircuitBreaker.HalfOpenRequests}}}
 }
 
 // newBillingEligibilityFixture constructs eligibility with fixed balance reads
@@ -2431,7 +2435,7 @@ func newGrokCredentialFailoverHandler(t *testing.T, mode string) (*gatewayHTTPEn
 		upstream.failureStatus = map[int64]int{802: http.StatusInternalServerError}
 	}
 	cfg := &config.Config{}
-	cfg.Gateway.MaxProviderSwitches = 3
+	cfg.Gateway.Failover.MaxProviderSwitches = 3
 	billingCache := newBillingEligibilityFixture(cfg)
 	billingCache.Start()
 	completionInput2 := billingtestkit.Calculator(nil, nil)
@@ -2853,7 +2857,7 @@ func responseHeaderFilterForTest(cfg *config.Config) *egress.CompiledHeaderFilte
 	if cfg == nil {
 		return nil
 	}
-	return egress.CompileHeaderFilter(egress.ResponseHeaderOptions{Enabled: cfg.Security.ResponseHeaders.Enabled, AdditionalAllowed: cfg.Security.ResponseHeaders.AdditionalAllowed, ForceRemove: cfg.Security.ResponseHeaders.ForceRemove})
+	return egress.CompileHeaderFilter(egress.ResponseHeaderOptions{Enabled: cfg.Gateway.ResponseHeaders.Enabled, AdditionalAllowed: cfg.Gateway.ResponseHeaders.AdditionalAllowed, ForceRemove: cfg.Gateway.ResponseHeaders.ForceRemove})
 }
 
 // newExecutionAvailabilityForTest binds the supplied store and model policies
@@ -3090,9 +3094,9 @@ func testEndpoints() map[protocolcore.ProtocolID]string {
 func newAppHealthObserverFixture(store gatewayprovider.ExecutionProviderStore, cfg *config.Config) *provideradapter.UpstreamHealth {
 	options := providercore.HealthOptions{}
 	if cfg != nil {
-		options.UnauthorizedCooldownMinutes = cfg.RateLimit.OAuth401CooldownMinutes
-		options.OverloadMinutes = cfg.RateLimit.OverloadCooldownMinutes
-		options.UsageMonitorIntervalMinutes = cfg.Gateway.UsageMonitor.IntervalMinutes
+		options.UnauthorizedCooldownMinutes = cfg.Provider.Cooldown.OAuth401Minutes
+		options.OverloadMinutes = cfg.Provider.Cooldown.OverloadMinutes
+		options.UsageMonitorIntervalMinutes = cfg.Provider.UsageMonitor.IntervalMinutes
 	}
 	return gatewaytestkit.NewHealthObserver(gatewaytestkit.HealthInput{Store: store, Options: options})
 }
@@ -3683,7 +3687,7 @@ func RegisterGatewayRoutes(
 	}
 	countTokensHTTP := h.CountTokensHTTP
 	if countTokensHTTP == nil && h.TextEnabled {
-		countTokensHTTP = gatewayhttp.NewCountTokensHandler(cfg.Gateway.MaxBodySize, 0, gatewayhttp.CountHTTPPorts{ReadAccess: keyhttp.GetAPIKeyFromContext, Funding: routeCountUnavailable{}, ObserveCompatibility: func(*zap.Logger) {}}, (*promptpolicy.Service)(nil))
+		countTokensHTTP = gatewayhttp.NewCountTokensHandler(cfg.Gateway.MaxRequestBodyBytes, 0, gatewayhttp.CountHTTPPorts{ReadAccess: keyhttp.GetAPIKeyFromContext, Funding: routeCountUnavailable{}, ObserveCompatibility: func(*zap.Logger) {}}, (*promptpolicy.Service)(nil))
 	}
 	qoderCompatibleHTTP := h.QoderCompatibleHTTP
 	if qoderCompatibleHTTP == nil {

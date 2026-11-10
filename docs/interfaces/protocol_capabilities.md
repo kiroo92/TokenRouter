@@ -81,7 +81,7 @@ OpenAI API Key 提供商的 `credentials.images_generations_mode` 和 `credentia
 各平台的原生协议：
 
 - OpenCode API Key：按模型声明的 Messages、Responses、Chat、GenerateContent 或 SystemOne，细节见 [OpenCode 上游](opencode_upstream.md#opencode_routing)。
-- Jev API Key：SystemOne，支持同步决策请求。
+- Jev API Key：SystemOne，支持同步文本、图片决策及 Box 定位请求；图片和 Box 使用显式实验启用头。
 - OpenAI API Key：Responses、Chat、Embeddings、Images 生成和编辑、Responses WebSocket、Compact、Alpha Search。
 - OpenAI OAuth：Responses、WebSocket、Compact、Alpha Search、Live。PAT 没有 Alpha Search 和 Live，Agent Identity 没有 Live。OpenAI 没有 Messages 原生项。
 - Grok：HTTP Responses、Chat、Images、视频和 Voice 是原生项；WebSocket、搜索和 Compact 是转换入口。
@@ -119,6 +119,19 @@ Responses 图片策略和 Images 入口互相独立：`inherit` 沿用提供商�
 | 批量图片的查询、下载、取消、删除 | 按作业生命周期处理 |
 | Live Sideband | 归属 Live 会话，不增加协议项 |
 | 自定义声音的读取、修改、删除、音频下载 | 归属自定义声音协议和它的资源权限 |
+
+<a id="client_usage_cache"></a>
+## 客户端用量与缓存
+
+文本响应的客户端用量和后台结算使用同一次上游观察。Messages 的 `input_tokens` 只包含普通输入，缓存读取和写入分别放在 `cache_read_input_tokens`、`cache_creation_input_tokens`；Chat 的 `prompt_tokens` 和 Responses 的 `input_tokens` 包含这三个输入桶。转换时只相加一次，缓存写入的聚合数与 5 分钟、1 小时分档不能重复计数。
+
+Gemini 的 `cachedContentTokenCount` 映射到目标协议的缓存读取字段，流式和非流式使用同一口径。OpenAI 兼容响应支持已有的嵌套明细和顶层缓存别名，包括 DeepSeek 的 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`；标准嵌套缓存字段优先，明确的零不会被备用别名替换。未报告的缓存数不按输入长度或命中率估算。
+
+转换读取器按字段合并不完整用量帧，再把同一份快照交给客户端转换和计费。只有输出数的尾帧保留先前输入与缓存数；OpenAI 完整的显式零用量仍可清空旧快照，Messages 保留原有累计字段与 TTL 分档的更新规则。Responses 转换中，终态内嵌 `response.usage` 的已报告字段优先于同帧顶层 `usage`；未报告字段从本次请求的已有观察补齐。每次上游尝试独立持有快照。
+
+OpenAI 转换的计费快照还保留图片输入、输出桶，文本客户端类型未声明这些字段时也不丢弃。图片明细缺失时沿用已有观察，明确的零值更新对应桶；hosted image 明细只补充同一 envelope 中 usage 的零图片计数。Chat 帧因字段类型不兼容而无法转换时，原始用量解析器能读取的计数仍参与累计；不能解析为有效 JSON 对象的 usage 不更新快照。
+
+Messages 的缓存写入分档保留在其标准 `cache_creation` 明细中；转换到 Chat 或 Responses 时保留写入总数，不增加私有 TTL 字段。Chat 的 usage 输出继续遵循所属适配器原有的输出策略，关闭可选 usage 不代表缓存未命中。原生透传保留上游字段；SSE 汇总为 JSON 时，仅在已有观察能补齐终态用量时修补计数，保留其他字段与原始数值表示。
 
 ## 上游响应模型观测
 

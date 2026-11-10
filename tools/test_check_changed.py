@@ -30,6 +30,39 @@ def flat(files):
 class PlanTest(unittest.TestCase):
     """PlanTest verifies pre-push command selection across source and configuration changes."""
 
+    def test_plugin_go_contract_change_checks_host_consumers(self):
+        """An SDK contract change can break host code without editing backend files.
+
+        The SDK and its host consumers must both be checked, while this Go-only
+        path must not require a frontend package manager or browser build.
+        """
+        result = flat(['plugin-sdk/go/manifest/manifest.go'])
+        self.assertIn('go test ./...', result)
+        self.assertIn('go test ./internal/plugin/... ./internal/app', result)
+        self.assertIn('bash ../../tools/golangci-lint.sh run ./...', result)
+        self.assertFalse(any('pnpm' in line for line in result))
+
+    def test_plugin_web_change_builds_sdk_and_consumer(self):
+        """A frontend SDK change must compile the minimal consumer against its types.
+
+        Frozen dependency installation precedes SDK tests, and the consumer build
+        verifies the preset instead of relying only on declaration typechecking.
+        """
+        result = flat(['plugin-sdk/web/src/types.ts'])
+        self.assertIn('make prepare-plugin-sdk-web', result)
+        self.assertIn('pnpm --dir plugin-sdk/web test', result)
+        self.assertFalse(any('examples/checkin' in line for line in result))
+        self.assertFalse(any(line == 'go test ./...' for line in result))
+
+    def test_release_tool_change_selects_isolated_regressions(self):
+        """Release tooling changes need their isolated Git and registry regressions.
+
+        The selected suite must run before a push without publishing a package
+        or depending on credentials for a real release destination.
+        """
+        result = flat(['.agents/skills/tr-release/scripts/sdk_release.py'])
+        self.assertIn("python3 -m unittest discover -s .agents/skills/tr-release/scripts -p test_*.py", result)
+
     def test_document_change_only_checks_whitespace(self):
         """A documentation-only change needs the shared whitespace check.
 
@@ -41,17 +74,31 @@ class PlanTest(unittest.TestCase):
     def test_go_change_lints_and_tests_changed_package(self):
         """A Go source change selects formatting, architecture, lint, and package tests.
 
-        Both committed and working-tree formatting are checked, while Node and pnpm
-        remain unnecessary for this push.
+        Both committed and working-tree formatting are checked, and architecture
+        rescans external source inputs without cached results. Node and pnpm remain unnecessary.
         """
         result = flat(['backend/internal/apikey/service.go'])
         self.assertIn('python3 tools/format_go.py --check --base ' + BASE, result)
         self.assertIn('python3 tools/format_go.py --check', result)
-        self.assertIn('env GOWORK=off go test ./...', result)
+        self.assertIn('env GOWORK=off go test -count=1 ./...', result)
         self.assertIn('bash ../tools/golangci-lint.sh run --build-tags=integration --new-from-rev='
                       + BASE + ' ./internal/apikey', result)
         self.assertIn('go test ./internal/apikey', result)
         self.assertFalse(any('pnpm' in line for line in result))
+
+    def test_architecture_changes_rescan_backend_without_package_tests(self):
+        """Architecture policy changes must recheck backend imports without a source edit.
+
+        The scan bypasses cached results for policy, fixture, and module changes,
+        while unrelated backend package tests and frontend checks remain unselected.
+        """
+        for file in ['tools/architecture/catalog.go', 'tools/architecture/policy_test.go',
+                     'tools/architecture/go.mod']:
+            with self.subTest(file=file):
+                self.assertEqual(commands([file]), [
+                    ['git', 'diff', '--check', BASE],
+                    ['env', 'GOWORK=off', 'go', 'test', '-count=1', './...'],
+                ])
 
     def test_go_dependency_change_checks_whole_module(self):
         """A Go dependency update can affect packages throughout the module.

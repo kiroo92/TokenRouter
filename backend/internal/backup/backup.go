@@ -79,17 +79,20 @@ var (
 	// deployment key stability has not been configured.
 	ErrSecretEncryptionKeyNotConfigured = infraerrors.BadRequest(
 		"SECRET_ENCRYPTION_KEY_NOT_CONFIGURED",
-		"cannot store the S3 secret access key: no fixed secret encryption key is configured, so the auto-generated key would change on every restart and make the stored secret undecryptable after a restart or upgrade. Set a fixed TOTP_ENCRYPTION_KEY (e.g. generate one with `openssl rand -hex 32`) and try again",
+		"cannot store the S3 secret access key: no fixed secret encryption key is configured, so the auto-generated key would change on every restart and make the stored secret undecryptable after a restart or upgrade. Set a fixed security.secret_encryption_key (e.g. generate one with `openssl rand -hex 32`) and try again",
 	)
 
 	// backupContentTableDataGroups maps optional categories to pg_dump table-data
 	// patterns; disabling a category omits these rows while retaining table schemas.
+	// Plugin installations, indexes, KV, and ledger are business data and stay
+	// outside these optional exclusions so recovery retains intent and replay evidence.
 	backupContentTableDataGroups = map[string][]string{
 		"usage_records": {
 			"public.usage_logs",
 			"public.usage_user_activity",
 			"public.usage_logs_*",
 			"public.billing_usage_entries",
+			"public.billing_system_usage_entries",
 			"public.usage_billing_dedup",
 			"public.usage_billing_dedup_archive",
 			"public.usage_dashboard_hourly",

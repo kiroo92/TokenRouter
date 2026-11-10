@@ -1,5 +1,8 @@
 # =============================================================================
-# Docker Ignore File for TokenRouter
+# .dockerignore selects source inputs for TokenRouter image builds. Local data,
+# credentials, and deployment tooling are excluded from the build context;
+# the runtime entrypoint and legal documents remain available to the Dockerfiles
+# that copy them into build stages.
 # =============================================================================
 
 # Git
@@ -9,7 +12,6 @@
 
 # Documentation
 *.md
-!deploy/DOCKER.md
 docs/
 # admin-compliance gate 的 LegalDocumentView.vue 构建时会导入 docs/legal/*.md?raw。
 # docs/ 其他内容仍排除，只把法律文档子树放入 Docker 构建上下文。
@@ -33,6 +35,12 @@ build/
 # Node modules (will be installed in container)
 frontend/node_modules/
 node_modules/
+
+# Plugin SDK development dependencies and sample outputs are rebuilt from source;
+# exclude them from the backend module copy and the container build context.
+plugin-sdk/**/node_modules/
+plugin-sdk/**/dist/
+plugin-sdk/web/tests/
 
 # Go build cache (will be built in container)
 backend/vendor/
@@ -61,13 +69,9 @@ tmp/
 temp/
 *.tmp
 
-# Deploy files (not needed in image)
-deploy/install.sh
-deploy/tokenrouter.service
-deploy/tokenrouter-sudoers
-deploy/data/
-deploy/postgres_data/
-deploy/redis_data/
+# Only the runtime entrypoint is consumed from the deployment directory.
+deploy/*
+!deploy/docker-entrypoint.sh
 
 # GoReleaser
 .goreleaser.yaml
@@ -79,3 +83,13 @@ deploy/redis_data/
 .claude/
 issues/
 CLAUDE.md
+
+# Local verification binaries and planning artifacts are not runtime inputs.
+# Keep them outside COPY backend and avoid shipping development data to builders.
+backend/bin/
+backend/server
+backend/*.test
+backend/data/
+.agents/
+refactor/
+output/

@@ -10,6 +10,7 @@ import admin from './admin'
 import misc from './misc'
 import team from './team'
 import requests from './requests'
+import plugins from './plugins'
 
 // index.ts assembles the Simplified Chinese interface catalog from domain
 // dictionaries and shared legal and localization messages. Named request and
@@ -21,6 +22,7 @@ export default {
   ...intelligence,
   ...remotePool,
   ...tickets,
+  plugins,
   requests,
   legal: {
     login: '登录',
@@ -47,7 +49,7 @@ export default {
     back: '返回上一页',
     dashboard: '前往控制台',
     help: '需要帮助？',
-    support: '联系客服',
+    support: '联系我们',
   },
 
   localization: {
@@ -60,6 +62,8 @@ export default {
       site_name: '站点名称',
       site_title: '首页标题',
       site_subtitle: '副标题',
+      site_share_title: '分享标题',
+      site_share_description: '分享简介',
     },
     original: '原文',
     originalLanguage: '原文语言',

@@ -32,6 +32,13 @@ import (
 // and lightweight reader methods required by selection.
 var _ Groups = (*mockGroupRepoForGemini)(nil)
 
+// candidateAttributeRepo supplies attribute profiles for candidate and probe tests.
+type candidateAttributeRepo struct {
+	failure                          error                         // configured profile read failure
+	routing.ModelAttributeRepository                               // unused attribute repository operations
+	config                           *routing.ModelAttributeConfig // configured route capability rules
+}
+
 // grokFreeQuotaUsageRepoStub records quota usage reads and copies provider
 // statistics under its mutex.
 type grokFreeQuotaUsageRepoStub struct {
@@ -297,7 +304,7 @@ func diagnosticParameterDefaults(cfg *config.Config) schedulercore.ParameterDefa
 	if cfg == nil {
 		return defaults
 	}
-	value := cfg.Gateway.AdvancedScheduler
+	value := cfg.Scheduling.Advanced
 	if value.LBTopK > 0 {
 		defaults.TopK = value.LBTopK
 	}
@@ -338,8 +345,8 @@ func (r *grokFreeQuotaUsageRepoStub) GetProviderWindowStatsBatch(_ context.Conte
 // observation.
 func newGrokFreeQuotaTestGate(cfg *config.Config, reader usage.UsageLogRepository, background func(string, func()) bool) *providercore.FreeQuotaGate {
 	return providercore.NewFreeQuotaGate(func() providercore.FreeQuotaOptions {
-		v := cfg.Gateway.Grok
-		return providercore.FreeQuotaOptions{Enabled: v.FreeQuotaSoftGateEnabled, TokenLimit: v.FreeQuotaTokenLimit, Percent: v.FreeQuotaSoftGatePercent, WindowHours: v.FreeQuotaWindowHours, CacheSeconds: v.FreeQuotaStatsCacheSeconds}
+		v := cfg.Scheduling.GrokFreeQuota
+		return providercore.FreeQuotaOptions{Enabled: v.Enabled, TokenLimit: v.TokenLimit, Percent: v.ThresholdPercent, WindowHours: v.WindowHours, CacheSeconds: v.StatsCacheSeconds}
 	}, func(ctx context.Context, ids []int64, start time.Time) (map[int64]int64, error) {
 		return usage.ReadProviderTokenWindow(ctx, reader, ids, start)
 	}, background, time.Now, nil, nil)
@@ -773,18 +780,18 @@ func selectionOptionsForTest(cfg *config.Config) Options {
 		return options
 	}
 
-	value := cfg.Gateway.Scheduling
-	options.Scheduling = schedulercore.FlowOptions{LoadBatchEnabled: value.LoadBatchEnabled, PreferSoonestReset: value.PreferSoonestReset, FallbackMaxWaiting: value.FallbackMaxWaiting, StickySessionMaxWaiting: value.StickySessionMaxWaiting, FallbackSelectionMode: value.FallbackSelectionMode, FallbackWaitTimeout: value.FallbackWaitTimeout, StickySessionWaitTimeout: value.StickySessionWaitTimeout}
-	ws := cfg.Gateway.OpenAIWS
-	options.ReadLegacySticky = ws.SessionHashReadOldFallback
-	options.WriteLegacySticky = ws.SessionHashDualWriteOld
-	if ws.StickySessionTTLSeconds > 0 {
+	value := cfg.Scheduling
+	options.Scheduling = schedulercore.FlowOptions{LoadBatchEnabled: value.LoadBatch.Enabled, PreferSoonestReset: value.PreferSoonestReset, FallbackMaxWaiting: value.AlternateProviderWait.MaxWaiting, StickySessionMaxWaiting: value.StickyProviderWait.MaxWaiting, FallbackSelectionMode: value.AlternateSelectionMode, FallbackWaitTimeout: time.Duration(value.AlternateProviderWait.TimeoutSeconds) * time.Second, StickySessionWaitTimeout: time.Duration(value.StickyProviderWait.TimeoutSeconds) * time.Second}
+	ws := cfg.Scheduling.SessionAffinity
+	options.ReadLegacySticky = ws.ReadLegacyHash
+	options.WriteLegacySticky = ws.DualWriteLegacyHash
+	if ws.TTLSeconds > 0 {
 		// Startup configuration stores seconds; sticky callers consume a duration.
-		options.StickyTTL = time.Duration(ws.StickySessionTTLSeconds) * time.Second
+		options.StickyTTL = time.Duration(ws.TTLSeconds) * time.Second
 	}
-	if ws.StickyResponseIDTTLSeconds > 0 {
+	if ws.ResponseIDTTLSeconds > 0 {
 		// Response affinity configuration stores seconds; bindings consume a duration.
-		options.ResponseTTL = time.Duration(ws.StickyResponseIDTTLSeconds) * time.Second
+		options.ResponseTTL = time.Duration(ws.ResponseIDTTLSeconds) * time.Second
 	}
 	return options
 }
@@ -819,6 +826,11 @@ func newCompatibleSelectionForTest(deps CompatibleDependencies, cfg *config.Conf
 		deps.Parameters = schedulercore.NewParameters(schedulercore.NewSettingsRuntime(schedulercore.Diagnostics{}), nil, diagnosticParameterDefaults(cfg))
 	}
 	return NewCompatible(deps, selectionOptionsForTest(cfg))
+}
+
+// ForGroup returns the configured profile or read failure for this selection.
+func (r candidateAttributeRepo) ForGroup(context.Context, int64) (*routing.ModelAttributeConfig, error) {
+	return r.config, r.failure
 }
 
 // selectionFixtureGroupID returns a fixture group from request state, candidate
@@ -1168,7 +1180,7 @@ func (c *schedulerTestGatewayCache) RefreshSessionOwnerTTL(ctx context.Context, 
 // lifetime for compatible fixtures.
 func newSchedulerTestOpenAIWSV2Config() *config.Config {
 	cfg := &config.Config{}
-	cfg.Gateway.OpenAIWS.StickyResponseIDTTLSeconds = 3600
+	cfg.Scheduling.SessionAffinity.ResponseIDTTLSeconds = 3600
 	return cfg
 }
 

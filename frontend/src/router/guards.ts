@@ -2,6 +2,7 @@ import type { Router } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
+import { usePluginsStore } from '@/stores/plugins'
 import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
@@ -100,6 +101,7 @@ export function installRouteGuards(router: Router): void {
       to,
       appStore.siteName,
       customMenuItems,
+      usePluginsStore().plugins,
       appStore.cachedPublicSettings?.subscription_entry_enabled,
     )
     const requiresAuth = to.meta.requiresAuth !== false // Default to true

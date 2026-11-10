@@ -94,6 +94,8 @@ func (b *geminiMessageAttemptBridge) FirstSelectionFailure(err error, _ bool) {
 // Acquire reuses the selected provider lease or waits under its required plan.
 // Missing plan rejects forwarding; after a successful wait it best-effort
 // binds sticky identity, while an already acquired selection skips that bind.
+// Acceptance freezes initial HTTP admission before sticky persistence; retries
+// retain the first acquisition endpoint and record their waiting separately.
 //
 // Registration errors permit uncounted waiting and explicit queue refusal
 // rejects before slot polling. Counted ownership is released after acquisition
@@ -104,7 +106,9 @@ func (b *geminiMessageAttemptBridge) Acquire() bool {
 	// Preserve a selection-owned lease; waiting is used only when selection did
 	// not acquire the provider resource and supplied its explicit wait plan.
 	b.providerReleaseFunc = b.selection.ReleaseFunc
-	if !b.selection.Acquired {
+	if b.selection.Acquired {
+		gatewayhttp.MarkOpsProviderSlotAcquired(b.c)
+	} else {
 		if b.selection.WaitPlan == nil {
 			gatewayhttp.MarkOpsRoutingCapacityLimited(b.c)
 			b.reqLog.Warn("gateway.select_provider_no_slot_no_wait_plan",
@@ -158,6 +162,7 @@ func (b *geminiMessageAttemptBridge) Acquire() bool {
 		}
 		// Stop counting this request as waiting once its slot is acquired.
 		releaseWait()
+		gatewayhttp.MarkOpsProviderSlotAcquired(b.c)
 		if err := b.binding().bindSticky(b.c.Request.Context(), b.apiKey.GroupID, b.sessionKey, b.provider.Record.ID); err != nil {
 			b.reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("provider_id", b.provider.Record.ID), zap.Error(err))
 		}
@@ -190,7 +195,7 @@ func (b *geminiMessageAttemptBridge) Forward(state textflow.AttemptState) textfl
 	}
 	// Capture after slot waits so retry commitment observes this forwarding’s
 	// bytes independently of headers or keepalives already written during admission.
-	b.writerSizeBeforeForward = b.c.Writer.Size()
+	b.writerSizeBeforeForward = gatewayhttp.HeartbeatAdjustedWrittenSize(b.c)
 	if b.provider.Record.Platform == capability.PlatformAntigravity {
 		b.result, err = b.binding().forwardAntigravityGemini(
 			requestCtx,
@@ -210,7 +215,7 @@ func (b *geminiMessageAttemptBridge) Forward(state textflow.AttemptState) textfl
 		b.providerReleaseFunc()
 	}
 	b.binding().reportSchedule(b.selection, b.provider.Record.ID, err == nil, b.result)
-	out := textflow.Outcome{Attempt: messageObservedAttempt(b.result, err), Err: err, HasResult: b.result != nil, OutputChanged: b.c.Writer.Size() != b.writerSizeBeforeForward}
+	out := textflow.Outcome{Attempt: messageObservedAttempt(b.result, err), Err: err, HasResult: b.result != nil, OutputChanged: gatewayhttp.HeartbeatAdjustedWrittenSize(b.c) != b.writerSizeBeforeForward}
 	out.Attempt.HTTPCommitted = b.c.Writer.Written()
 	out.Attempt.RetryCommitted = out.OutputChanged
 	if retry, ok := errors.AsType[*forwardcore.UpstreamFailoverError](err); ok {

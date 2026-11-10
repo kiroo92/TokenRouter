@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/TokenFlux/TokenRouter/internal/billing"
+	"github.com/TokenFlux/TokenRouter/internal/identity/authconfig"
 	infraerrors "github.com/TokenFlux/TokenRouter/internal/pkg/apperror"
 	"github.com/TokenFlux/TokenRouter/internal/pkg/locale"
 	"github.com/TokenFlux/TokenRouter/internal/pkg/pagination"
@@ -96,17 +97,18 @@ var (
 
 	// These errors report profile authorization, recipient limits, avatar input
 	// failures and identity controls to callers before or after their selected persistence work.
-	ErrBalanceNegative             = billing.ErrBalanceNegative
-	ErrInsufficientPerms           = infraerrors.Forbidden("INSUFFICIENT_PERMISSIONS", "insufficient permissions")
-	ErrNotifyCodeUserRateLimit     = infraerrors.TooManyRequests("NOTIFY_CODE_USER_RATE_LIMIT", "too many verification codes requested, please try again later")
-	ErrAvatarInvalid               = infraerrors.BadRequest("AVATAR_INVALID", "avatar must be a valid image data URL or http(s) URL")
-	ErrAvatarTooLarge              = infraerrors.BadRequest("AVATAR_TOO_LARGE", "avatar image must be 100KB or smaller")
-	ErrAvatarNotImage              = infraerrors.BadRequest("AVATAR_NOT_IMAGE", "avatar content must be an image")
-	ErrProfileEmailChangeForbidden = infraerrors.BadRequest("EMAIL_PROFILE_UPDATE_FORBIDDEN", "email must be changed through verified email binding")
-	ErrIdentityProviderInvalid     = infraerrors.BadRequest("IDENTITY_PROVIDER_INVALID", "identity provider is invalid")
-	ErrIdentityRedirectInvalid     = infraerrors.BadRequest("IDENTITY_REDIRECT_INVALID", "identity redirect path is invalid")
-	ErrUserAPIKeyLimitInvalid      = infraerrors.BadRequest("INVALID_API_KEY_LIMIT", fmt.Sprintf("api key limit must be between 0 and %d", MaxUserAPIKeyLimit))
-	ErrIdentityUnbindLastMethod    = infraerrors.Conflict(
+	ErrBalanceNegative                  = billing.ErrBalanceNegative
+	ErrInsufficientPerms                = infraerrors.Forbidden("INSUFFICIENT_PERMISSIONS", "insufficient permissions")
+	ErrNotifyCodeUserRateLimit          = infraerrors.TooManyRequests("NOTIFY_CODE_USER_RATE_LIMIT", "too many verification codes requested, please try again later")
+	ErrAvatarInvalid                    = infraerrors.BadRequest("AVATAR_INVALID", "avatar must be a valid image data URL or http(s) URL")
+	ErrAvatarTooLarge                   = infraerrors.BadRequest("AVATAR_TOO_LARGE", "avatar image must be 100KB or smaller")
+	ErrAvatarNotImage                   = infraerrors.BadRequest("AVATAR_NOT_IMAGE", "avatar content must be an image")
+	ErrProfileEmailChangeForbidden      = infraerrors.BadRequest("EMAIL_PROFILE_UPDATE_FORBIDDEN", "email must be changed through verified email binding")
+	ErrIdentityProviderInvalid          = infraerrors.BadRequest("IDENTITY_PROVIDER_INVALID", "identity provider is invalid")
+	ErrIdentityRedirectInvalid          = infraerrors.BadRequest("IDENTITY_REDIRECT_INVALID", "identity redirect path is invalid")
+	ErrUserAPIKeyLimitInvalid           = infraerrors.BadRequest("INVALID_API_KEY_LIMIT", fmt.Sprintf("api key limit must be between 0 and %d", MaxUserAPIKeyLimit))
+	ErrBalanceRechargeMultiplierInvalid = infraerrors.BadRequest("INVALID_BALANCE_RECHARGE_MULTIPLIER", "balance recharge multiplier must be a finite number greater than 0")
+	ErrIdentityUnbindLastMethod         = infraerrors.Conflict(
 		"IDENTITY_UNBIND_LAST_METHOD",
 		"bind another sign-in method before unbinding this provider",
 	)
@@ -1690,14 +1692,7 @@ func (s *UserService) SendNotifyVerifyEmail(ctx context.Context, sender NotifyVe
 // and scope callers the common default mode for absent or unrecognized
 // settings.
 func NormalizeWeChatConnectModeSetting(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "mp":
-		return "mp"
-	case "mobile":
-		return "mobile"
-	default:
-		return "open"
-	}
+	return authconfig.NormalizeWeChatConnectMode(raw)
 }
 
 // ParseWeChatConnectCapabilitySettings returns the open, official-account and

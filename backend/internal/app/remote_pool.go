@@ -26,9 +26,9 @@ func provideRemotePool(db *sql.DB, cipher identity.SecretEncryptor, cfg *config.
 	return remotepool.NewRemoteAccountPoolService(
 		postgres.NewRepository(db),
 		cipher,
-		cfg.Totp.EncryptionKeyConfigured,
+		cfg.Security.SecretEncryptionKeyConfigured,
 		groups,
 		provider.NewClient(),
-		cfg.JWT.Secret,
+		cfg.Auth.JWT.Secret,
 	)
 }

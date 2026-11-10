@@ -38,6 +38,7 @@ import Columns3Icon from './artwork/columns-3'
 import CopyIcon from './artwork/copy'
 import CpuIcon from './artwork/cpu'
 import CreditCardIcon from './artwork/credit-card'
+import CrownIcon from './artwork/crown'
 import DatabaseIcon from './artwork/database'
 import DownloadIcon from './artwork/download'
 import EllipsisIcon from './artwork/ellipsis'
@@ -121,6 +122,9 @@ import WalletIcon from './artwork/wallet'
 import WrenchIcon from './artwork/wrench'
 import XIcon from './artwork/x'
 import ZapIcon from './artwork/zap'
+import CalendarPlusIcon from './artwork/calendar-plus'
+import SendIcon from './artwork/send'
+import PuzzleIcon from './artwork/puzzle'
 import type { IconDefinition } from './types'
 
 // registry.ts maps semantic icon names to the ported Lucide artwork files.
@@ -130,6 +134,7 @@ import type { IconDefinition } from './types'
 // icons maps application names to imported artwork definitions; multiple
 // semantic names can intentionally share one renderer.
 export const icons = {
+  crown: CrownIcon, // Exclusive access emblem.
   play: PlayIcon,
   refresh: RefreshCwIcon,
   edit: SquarePenIcon,
@@ -188,6 +193,9 @@ export const icons = {
   shield: ShieldIcon,
   menu: MenuIcon,
   calendar: CalendarIcon,
+  calendarPlus: CalendarPlusIcon,
+  send: SendIcon,
+  puzzle: PuzzleIcon,
   home: HomeIcon,
   terminal: TerminalIcon,
   gift: GiftIcon,

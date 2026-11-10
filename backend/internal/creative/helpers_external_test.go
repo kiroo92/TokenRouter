@@ -30,6 +30,8 @@ import (
 	"github.com/TokenFlux/TokenRouter/internal/usage"
 )
 
+// helpers_external_test.go supplies in-memory fixtures for creative routing, persistence, funding, and worker tests.
+//
 // Creative fixtures adapt native users, groups, providers, Keys, and review
 // data into shared Public/Results dependencies. They retain task pointers,
 // byte slices, and call observations in local maps so scenarios can inspect
@@ -526,7 +528,7 @@ func newCreativePublicFixture(repo creative.CreativeRunRepository, keys creative
 	ttl := 30 * time.Minute
 	prefix := ""
 	if cfg != nil {
-		prefix = cfg.Default.APIKeyPrefix
+		prefix = cfg.APIKey.Prefix
 		if cfg.Creative.TransientTTLSeconds > 0 {
 			// Use one duration for output metadata deadlines and
 			// temporary save calls
@@ -645,6 +647,8 @@ func (r *creativeFakeRunRepo) CreateCreativeRun(ctx context.Context, params crea
 		Operation:                  params.Operation,
 		RequestedOutputCount:       params.RequestedOutputCount,
 		ImageSize:                  params.ImageSize,
+		FrameCount:                 params.FrameCount,
+		FrameDurationMS:            params.FrameDurationMS,
 		AspectRatio:                params.AspectRatio,
 		ResponseMIMEType:           params.ResponseMIMEType,
 		PromptHash:                 params.PromptHash,
@@ -1307,15 +1311,14 @@ func newCreativeTestService() *creative.Public {
 		}},
 		&config.Config{
 			Creative: config.CreativeConfig{
-				Enabled:                 true,
-				TransientTTLSeconds:     1800,
-				MaxAssetBytes:           33554432,
-				MaxTotalInputBytes:      67108864,
-				MaxPromptChars:          8000,
-				DefaultResponseMimeType: "image/png",
-				DefaultImageSize:        "1K",
+				Enabled:             true,
+				TransientTTLSeconds: 1800,
+				MaxAssetBytes:       33554432,
+				MaxTotalInputBytes:  67108864,
+				MaxPromptChars:      8000,
+				DefaultImageSize:    "1K",
 			},
-			Default: config.DefaultConfig{APIKeyPrefix: "sk-"},
+			APIKey: config.APIKeyConfig{Prefix: "sk-"},
 		})
 	price1k, price2k := 0.02, 0.04
 	setCreativeConfigPricing(svc, group.ID, testImageModelPricing(map[string]*float64{"1K": &price1k, "2K": &price2k}))

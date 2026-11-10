@@ -7,7 +7,7 @@
 
 管理员在 `/admin/remote-account-pool` 配置远端站点、RT 和分组绑定，配置保存在 `settings.remote_account_pool`，不需要迁移。默认地址是 `https://aishenji.top`；也接受带部署路径前缀或以 `/api/v1` 结尾的地址。配置只允许 HTTP(S)，禁止 URL 凭据、查询参数和片段，外部请求不跟随重定向。
 
-RT 和取得的 AT 一并使用应用注入的 `SecretEncryptor` 加密保存，要求部署配置固定的 `TOTP_ENCRYPTION_KEY`；配置响应仅返回是否已配置及到期时间。审计记录不保存该配置请求的正文。系统不保存邮箱密码，也不调用远端登录接口。RT 留空表示保留原值；填写新 RT 清除旧 AT 和失效标记，但保留同一站点的最近成功快照。更换远端站点则清除原会话和快照。
+RT 和取得的 AT 一并使用应用注入的 `SecretEncryptor` 加密保存，要求部署配置固定的 `security.secret_encryption_key`；旧版 `TOTP_ENCRYPTION_KEY` 在 v1 配置迁移时导入；配置响应仅返回是否已配置及到期时间。审计记录不保存该配置请求的正文。系统不保存邮箱密码，也不调用远端登录接口。RT 留空表示保留原值；填写新 RT 清除旧 AT 和失效标记，但保留同一站点的最近成功快照。更换远端站点则清除原会话和快照。
 
 配置接口和远端分组目录仅限管理员：
 

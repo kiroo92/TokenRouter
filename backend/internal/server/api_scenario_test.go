@@ -52,9 +52,10 @@ import (
 	"github.com/TokenFlux/TokenRouter/internal/usage/httpapi/ports"
 )
 
-// api_scenario_test.go checks public responses exposing selected user fields.
-// Administrator responses carry management details and configured-state flags.
-// These cases cross identity/httpapi/session_handler.go, apikey/httpapi/key_handler.go,
+// api_scenario_test.go verifies public panel and administrator response contracts.
+// Public responses expose selected user fields while administrator responses
+// carry management details and configured-state flags. These cases
+// cross identity/httpapi/session_handler.go, apikey/httpapi/key_handler.go,
 // usage/httpapi/usage_handler.go, billing/httpapi/subscription_handler.go,
 // billing/httpapi/admin_subscription_handler.go,
 // billing/httpapi/redeem_handler.go, settings/httpapi/composite_get.go, and
@@ -1090,7 +1091,14 @@ func TestAPIContracts(t *testing.T) {
 			name: "GET /api/v1/admin/settings",
 			setup: func(t *testing.T, deps *contractDeps) {
 				t.Helper()
+				// Seed an explicit reporting opt-out and enabled diagnostics alongside
+				// a private identity. Exact response comparison must expose only the four controls.
 				deps.settingRepo.SetAll(map[string]string{
+					"bstats_enabled":                                    "false",
+					"bstats_log_errors":                                 "true",
+					"bstats_log_sent_data":                              "true",
+					"bstats_log_response_status_text":                   "true",
+					"bstats_server_uuid":                                "fe5233bb-2ed6-4a60-99da-45b42c6c29ec",
 					identity.SettingKeyRegistrationEnabled:              "true",
 					identity.SettingKeyEmailVerifyEnabled:               "false",
 					identity.SettingKeyRegistrationEmailNormalization:   "false",
@@ -1253,10 +1261,11 @@ func TestAPIContracts(t *testing.T) {
 						"ops_realtime_monitoring_enabled": true,
 						"ops_metrics_interval_seconds": 60,
 						"default_locale": "en",
- "site_texts": {"site_name": {"source_locale": null, "source": "TokenRouter", "translations": {}, "revision": 0, "source_revision": 0}, "site_title": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "site_subtitle": {"source_locale": null, "source": "Subtitle", "translations": {}, "revision": 0, "source_revision": 0}, "contact_info": {"source_locale": null, "source": "support", "translations": {}, "revision": 0, "source_revision": 0}, "doc_url": {"source_locale": null, "source": "https://docs.example.com", "translations": {}, "revision": 0, "source_revision": 0}, "home_content": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "purchase_subscription_url": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "footer_text": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}},
+ "site_texts": {"site_share_title": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "site_share_description": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "site_name": {"source_locale": null, "source": "TokenRouter", "translations": {}, "revision": 0, "source_revision": 0}, "site_title": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "site_subtitle": {"source_locale": null, "source": "Subtitle", "translations": {}, "revision": 0, "source_revision": 0}, "contact_info": {"source_locale": null, "source": "support", "translations": {}, "revision": 0, "source_revision": 0}, "doc_url": {"source_locale": null, "source": "https://docs.example.com", "translations": {}, "revision": 0, "source_revision": 0}, "home_content": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "purchase_subscription_url": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "footer_text": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}},
  "localized_settings": {"balance_unit_name": {"source_locale": null, "source": "USD", "translations": {}, "revision": 0, "source_revision": 0}, "balance_low_notify_recharge_url": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "oidc_connect_provider_name": {"source_locale": null, "source": "OIDC", "translations": {}, "revision": 0, "source_revision": 0}, "payment_help_text": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "payment_help_image_url": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "payment_product_name_prefix": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "payment_product_name_suffix": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "smtp_from_name": {"source_locale": null, "source": "TokenRouter", "translations": {}, "revision": 0, "source_revision": 0}},
 "site_name": "TokenRouter",
 						"site_logo": "",
+ "site_share_image": "",
 						"site_subtitle": "Subtitle",
 						"api_base_url": "https://api.example.com",
 						"client_provider_id": "tokenrouter",
@@ -1486,6 +1495,10 @@ func TestAPIContracts(t *testing.T) {
 					"provider_quota_notify_enabled": false,
 					"provider_scheduling_thresholds": {"anthropic":100,"grok":100,"openai":100},
 					"subscription_expiry_notify_enabled": true,
+					"bstats_enabled": false,
+					"bstats_log_errors": true,
+					"bstats_log_sent_data": true,
+					"bstats_log_response_status_text": true,
 					"team_enabled": true,
 					"risk_control_enabled": false,
 					"balance_unit_name": "USD",
@@ -1518,7 +1531,7 @@ func TestAPIContracts(t *testing.T) {
 			name: "GET /api/v1/admin/settings falls back to config oauth defaults",
 			setup: func(t *testing.T, deps *contractDeps) {
 				t.Helper()
-				deps.cfg.OIDC = config.OIDCConnectConfig{
+				deps.cfg.Auth.OAuth.OIDC = config.OIDCConnectConfig{
 					Enabled:             true,
 					ProviderName:        "ConfigOIDC",
 					ClientID:            "oidc-config-client",
@@ -1533,7 +1546,7 @@ func TestAPIContracts(t *testing.T) {
 					AllowedSigningAlgs:  "RS256,ES256,PS256",
 					ClockSkewSeconds:    120,
 				}
-				deps.cfg.WeChat = config.WeChatConnectConfig{
+				deps.cfg.Auth.OAuth.WeChat = config.WeChatOAuthConfig{
 					Enabled:             true,
 					OpenEnabled:         true,
 					OpenAppID:           "wx-open-config",
@@ -1655,10 +1668,11 @@ func TestAPIContracts(t *testing.T) {
 						"google_oauth_redirect_url": "",
 						"google_oauth_frontend_redirect_url": "/auth/oauth/callback",
 						"default_locale": "en",
- "site_texts": {"site_name": {"source_locale": null, "source": "TokenRouter", "translations": {}, "revision": 0, "source_revision": 0}, "site_title": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "site_subtitle": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "contact_info": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "doc_url": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "home_content": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "purchase_subscription_url": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "footer_text": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}},
+ "site_texts": {"site_share_title": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "site_share_description": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "site_name": {"source_locale": null, "source": "TokenRouter", "translations": {}, "revision": 0, "source_revision": 0}, "site_title": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "site_subtitle": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "contact_info": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "doc_url": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "home_content": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "purchase_subscription_url": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "footer_text": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}},
  "localized_settings": {"balance_unit_name": {"source_locale": null, "source": "USD", "translations": {}, "revision": 0, "source_revision": 0}, "balance_low_notify_recharge_url": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "oidc_connect_provider_name": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "payment_help_text": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "payment_help_image_url": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "payment_product_name_prefix": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "payment_product_name_suffix": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}, "smtp_from_name": {"source_locale": null, "source": "", "translations": {}, "revision": 0, "source_revision": 0}},
 "site_name": "TokenRouter",
 						"site_logo": "",
+ "site_share_image": "",
 						"site_subtitle": "Subscription to API Conversion Platform",
 					"api_base_url": "",
 					"client_provider_id": "tokenrouter",
@@ -1854,6 +1868,10 @@ func TestAPIContracts(t *testing.T) {
 					"provider_quota_notify_enabled": false,
 					"provider_scheduling_thresholds": {"anthropic":100,"grok":100,"openai":100},
 					"subscription_expiry_notify_enabled": true,
+					"bstats_enabled": true,
+					"bstats_log_errors": false,
+					"bstats_log_sent_data": false,
+					"bstats_log_response_status_text": false,
 					"team_enabled": true,
 					"risk_control_enabled": false,
 					"balance_unit_name": "USD",
@@ -1997,11 +2015,7 @@ func newContractDeps(t *testing.T, setup func(*testing.T, *contractDeps)) *contr
 	providerRepo := stubProviderRepo{}
 	redeemRepo := &stubRedeemCodeRepo{}
 
-	cfg := &config.Config{
-		Default: config.DefaultConfig{
-			APIKeyPrefix: "sk-",
-		},
-	}
+	cfg := &config.Config{APIKey: config.APIKeyConfig{Prefix: "sk-"}}
 
 	usageRepo := newStubUsageLogRepo()
 	settingRepo := newStubSettingRepo()

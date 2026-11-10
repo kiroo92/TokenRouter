@@ -3,6 +3,7 @@ import { defineComponent, h } from 'vue'
 import { flushPromises, mount, DOMWrapper, enableAutoUnmount } from '@vue/test-utils'
 
 import SettingsView from '../SettingsView.vue'
+import ImageUpload from '@/components/common/ImageUpload.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 
 // SettingsView.spec.ts exercises settings editing through mounted page controls and
@@ -790,7 +791,12 @@ const baseSettingsResponse = {
 // mountView renders the settings page with input and peripheral component stubs.
 // Tests await initial API promises before editing, and automatic teardown unmounts
 // the page after each scenario to release its listeners and polling intervals.
-function mountView() {
+// realImageUploads enables actual upload lifecycles for parent reset scenarios.
+function mountView({
+  realImageUploads = false,
+}: {
+  realImageUploads?: boolean // Mount real upload lifecycle when requested.
+} = {}) {
   return mount(SettingsView, {
     global: {
       stubs: {
@@ -807,7 +813,7 @@ function mountView() {
         GroupOptionItem: true,
         ProxySelector: true,
         ModelWhitelistSelector: true,
-        ImageUpload: ImageUploadStub,
+        ImageUpload: realImageUploads ? false : ImageUploadStub,
         BackupSettings: true,
         RechargeBonusSettings: true,
       },
@@ -1209,6 +1215,52 @@ describe('admin SettingsView payment visible method controls', () => {
     expect(updatePanelRateLimitSettings).toHaveBeenCalledTimes(1)
     expect(showSuccess).toHaveBeenCalledWith('admin.settings.settingsSaved')
     expect(wrapper.get('[data-testid="settings-save-bar"]').attributes('inert')).toBeDefined()
+  })
+
+  // An older server response omits bStats controls. The new draft keeps official
+  // defaults, saves explicit false with logging choices, and restores saved values on discard.
+  it('saves and discards bStats controls through the shared save bar', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const featuresTab = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('admin.settings.tabs.features'))!
+    await featuresTab.trigger('click')
+    const enabled = wrapper.get('#bstats-enabled')
+    expect((enabled.element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.get('[data-testid="bstats-settings"] a').attributes('href')).toBe(
+      'https://bstats.org/plugin/server-implementation/tokenrouter/35120',
+    )
+    await wrapper.get('#bstats-log-errors').setValue(true)
+    await wrapper.get('#bstats-log-sent-data').setValue(true)
+    await wrapper.get('#bstats-log-response-status-text').setValue(true)
+    await enabled.setValue(false)
+    await saveFromSaveBar(wrapper)
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bstats_enabled: false,
+        bstats_log_errors: true,
+        bstats_log_sent_data: true,
+        bstats_log_response_status_text: true,
+      }),
+    )
+    expect((enabled.element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.get('[data-testid="settings-save-bar"]').attributes('inert')).toBeDefined()
+    getSettings.mockResolvedValue({
+      ...baseSettingsResponse,
+      bstats_enabled: false,
+      bstats_log_errors: true,
+      bstats_log_sent_data: true,
+      bstats_log_response_status_text: true,
+    })
+    await enabled.setValue(true)
+    await wrapper.get('#bstats-log-errors').setValue(false)
+    await wrapper.get('[data-testid="settings-save-bar-discard"]').trigger('click')
+    await flushPromises()
+    expect((enabled.element as HTMLInputElement).checked).toBe(false)
+    await enabled.setValue(true)
+    expect((wrapper.get('#bstats-log-errors').element as HTMLInputElement).checked).toBe(true)
+    expect(updateSettings).toHaveBeenCalledTimes(1)
   })
 
   // Pressing Enter can submit a settings form whose snapshots are already clean.
@@ -3192,5 +3244,93 @@ describe('admin SettingsView security tab controls', () => {
         oidc_connect_validate_id_token: false,
       }),
     )
+  })
+  // Selecting a cover updates only the local settings draft until save. The page
+  // submits the image through the combined request and restores it when changes are discarded.
+  it('saves and discards the social cover draft', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const cover = wrapper
+      .findAllComponents(ImageUploadStub)
+      .find((item) => item.attributes('wide') !== undefined)
+    expect(cover).toBeDefined()
+    cover!.vm.$emit('update:modelValue', 'data:image/png;base64,draft')
+    await flushPromises()
+    expect(updateSettings).not.toHaveBeenCalled()
+    await saveFromSaveBar(wrapper)
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ site_share_image: 'data:image/png;base64,draft' }),
+    )
+    getSettings.mockResolvedValueOnce({
+      ...(await getSettings.mock.results[0].value),
+      site_share_image: 'saved-cover',
+    })
+    cover!.vm.$emit('update:modelValue', '')
+    await flushPromises()
+    await wrapper.get('[data-testid="settings-save-bar-discard"]').trigger('click')
+    await flushPromises()
+    expect(cover!.props('modelValue')).toBe('saved-cover')
+  })
+  // Discard restores an unchanged cover while a selected replacement is still decoding.
+  // The mounted page must cancel that decoder before reload and keep uploads disabled until restoration finishes.
+  it('cancels pending cover decoding when discarding another dirty field', async () => {
+    // Browser decoding remains pending across the controlled settings reload.
+    let completeDecode: (() => void) | undefined
+    vi.stubGlobal(
+      'FileReader',
+      class {
+        onload: (() => void) | null = null // File-read completion callback.
+        result = 'data:image/png;base64,pending' // Replacement cover data URL.
+        /** readAsDataURL finishes reading so the component starts its pending decoder. */
+        readAsDataURL() {
+          this.onload?.()
+        }
+      },
+    )
+    vi.stubGlobal(
+      'Image',
+      class {
+        onload: (() => void) | null = null // Image-decode completion callback.
+        naturalWidth = 1200 // Decoded width in pixels.
+        naturalHeight = 630 // Decoded height in pixels.
+        /** src defers image completion until the discard lifecycle is under test. */
+        set src(_value: string) {
+          completeDecode = () => this.onload?.()
+        }
+      },
+    )
+    try {
+      const wrapper = mountView({ realImageUploads: true })
+      await flushPromises()
+      const cover = wrapper.findAllComponents(ImageUpload).find((item) => item.props('wide'))!
+      const originalValue = cover.props('modelValue')
+      const picker = cover.get('input[type="file"]')
+      Object.defineProperty(picker.element, 'files', {
+        configurable: true,
+        value: [new File(['png'], 'cover.png', { type: 'image/png' })],
+      })
+      await picker.trigger('change')
+      expect(completeDecode).toBeDefined()
+      await wrapper.get('#api-base-url').setValue('https://changed.example')
+      let finishReload!: (value: typeof baseSettingsResponse) => void
+      getSettings.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishReload = resolve
+        }),
+      )
+      await wrapper.get('[data-testid="settings-save-bar-discard"]').trigger('click')
+      expect(cover.props('disabled')).toBe(true)
+      completeDecode!()
+      expect(cover.emitted('update:modelValue')).toBeUndefined()
+      finishReload({ ...baseSettingsResponse })
+      await flushPromises()
+      expect(cover.props('disabled')).toBe(false)
+      completeDecode!()
+      expect(cover.props('modelValue')).toBe(originalValue)
+      expect(cover.emitted('update:modelValue')).toBeUndefined()
+      expect(updateSettings).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

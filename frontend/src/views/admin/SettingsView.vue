@@ -139,7 +139,7 @@
           v-content-reveal="activeTab === 'general'"
           class="space-y-4"
         >
-          <GeneralSettings :form="form" :controller="general" />
+          <GeneralSettings :form="form" :controller="general" :images-disabled="discarding" />
         </div>
 
         <div
@@ -255,7 +255,7 @@
 
 <script setup lang="ts">
 import { vContentReveal } from '@/directives/contentReveal'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import TicketSettingsTab from './settings/TicketSettingsTab.vue'
 import SettingsSkeleton from './settings/SettingsSkeleton.vue'
 import SettingsSaveBar from '@/components/common/settings/SettingsSaveBar.vue'
@@ -577,13 +577,18 @@ for (const [key, target] of settingsSaveTargets) {
 
 /**
  * discardAllSettings reloads dirty targets through the shared save registry.
- * The activity flag remains set until the registry's aggregate promise settles.
- * A rejection releases the controls even when other independent reloads remain
- * in flight, matching the registry's existing Promise.all behavior.
+ * The activity flag disables general-panel image editors before reload starts,
+ * invalidating their pending reads even when the saved image has not changed.
+ * The flag remains set until the registry's aggregate promise settles.
+ * Failed reloads also wait for the remaining targets before controls are enabled,
+ * so no outstanding restoration can race with a newly selected image.
  */
 async function discardAllSettings() {
   discarding.value = true
   try {
+    // Propagate disabled state before selecting dirty targets or restoring values;
+    // pending image callbacks must not overwrite the snapshot returned by this reload.
+    await nextTick()
     await settingsSaveRegistry.discardDirty()
   } finally {
     discarding.value = false

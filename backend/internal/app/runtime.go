@@ -15,6 +15,7 @@ type runtimeReady struct{}
 // actual loading and background startup occur when the lifecycle manager runs
 // the registered hooks.
 func provideRuntime(
+	_ *bstatsRuntimeReady,
 	_ *modelCatalogRuntimeReady,
 	_ *settingsRuntimeReady,
 	_ *authRuntimeReady,
@@ -23,6 +24,7 @@ func provideRuntime(
 	_ *queuesRuntimeReady,
 	_ *jobsRuntimeReady,
 	_ *coreRuntimeReady,
+	_ *pluginRuntimeReady,
 	_ *idempotencyHTTPReady,
 	_ *promptpolicy.Service,
 ) *runtimeReady {

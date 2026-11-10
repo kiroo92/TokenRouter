@@ -527,7 +527,7 @@ export default {
       notConfigured: 'Not configured',
       notRefreshed: 'Not refreshed',
       encryptionKeyRequired:
-        'Set a persistent TOTP_ENCRYPTION_KEY before storing a browser session.',
+        'Set a persistent security.secret_encryption_key before storing a browser session.',
       sessionLabel: 'Ollama browser Cookie',
       sessionPlaceholder: 'wos-session=...; __Secure-authjs.session-token.0=...',
       writeOnlyHint:
@@ -905,6 +905,9 @@ export default {
       textRouteForceChatCompletions: 'Force Chat Completions',
       textRouteTextDisabledHint:
         'Text protocol routing is not applicable when text generation is disabled.',
+      imagesGIFEnabled: 'GIF generation',
+      imagesGIFEnabledDesc:
+        'Enabled by default. Disable this for upstreams that do not support animated GIF output.',
       imagesURLToB64JSON: 'Fill image Base64 from URL',
       imagesURLToB64JSONDesc:
         'For non-streaming image results that only contain a URL, download the image and fill b64_json. Explicit URL-format requests are preserved; failed downloads keep the original URL.',
@@ -939,6 +942,10 @@ export default {
       codexFingerprintFull: 'Full convergence',
       codexImageToolDesc:
         'Controls image-generation tools in conversations. Group settings take precedence over provider settings. Separate image generation and editing endpoints are unaffected.',
+      imageResponsesModel: 'Image Responses model',
+      imageResponsesModelDesc:
+        'Text model used to invoke the image tool for OAuth generation and editing. Leave blank to use the default. The image model is configured separately.',
+      imageResponsesModelDefault: 'Default (gpt-6-luna)',
       codexImageToolInherit: 'Follow group and global settings',
       codexImageToolInheritDesc:
         'This provider does not set its own policy. The group policy applies when set; otherwise the global setting is used.',
@@ -1864,6 +1871,39 @@ export default {
     inviteResetNoCredit: 'No reset credit is available',
     // Test Modal
     decisionTest: {
+      inputChanged: 'Inputs have changed. These are the previous test results.',
+      removedImageReference: 'Remove or replace references to deleted images before testing.',
+      images: 'Images',
+      addImages: 'Add images',
+      readingImages: 'Reading images…',
+      imageHint:
+        'PNG or JPEG, up to 16 MiB each. Width and height: 280 to 1568 px. Select a text field to insert a reference; edit JSON state manually.',
+      insertReference: 'Insert reference',
+      copyReference: 'Copy reference',
+      referenceCopied: 'Copied',
+      removeImage: 'Remove {name}',
+      remove: 'Remove',
+      experimentalImages:
+        'Images and Box are experimental. This test enables image support; Box requires Jev 1.14.',
+      invalidImageFormat: 'Choose a PNG or JPEG image.',
+      imageTooLarge: 'Choose a nonempty image up to 16 MiB.',
+      invalidImageDimensions: 'Width and height must each be between 280 and 1568 pixels.',
+      imageReadFailed: 'Could not read this image. Choose it again.',
+      copyFailed: 'Copy the reference shown beside the image manually.',
+      targetImage: 'Target image',
+      selectImage: 'Select an image',
+      missingBoxImage: 'Select a target image for every Box question.',
+      unusedImage: 'Insert a reference to {name}, select it as a Box target, or remove it.',
+      requestTooLarge: 'The encoded request exceeds 32 MiB. Remove an image or use a smaller file.',
+      box: 'Box · Location',
+      imageUnavailable: 'The submitted target image is unavailable. Coordinates are shown below.',
+      top: 'Top',
+      bottom: 'Bottom',
+      left: 'Left',
+      right: 'Right',
+      normalizedCoordinates:
+        'Coordinates are fractions of the image width and height, measured from the top-left corner.',
+      confidenceUnavailable: 'Not provided',
       output: 'Decision results',
       viewResult: 'Results',
       metricUsage: 'Input / output tokens',
@@ -1913,6 +1953,7 @@ export default {
       guideHint:
         'Enter a state and questions, then start the test. One request can include several question types.',
       guide: {
+        box: 'Locate a target and view its box on the submitted image.',
         noul: 'See the probabilities of true and false.',
         choice: 'Find the selected answer and compare option probabilities.',
         score: 'See the continuous score, level distribution, and confidence.',

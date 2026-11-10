@@ -4,16 +4,15 @@ package payment_test
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/TokenFlux/TokenRouter/ent/paymentorder"
 	"github.com/TokenFlux/TokenRouter/internal/billing"
 	billingpostgres "github.com/TokenFlux/TokenRouter/internal/billing/postgres"
 	"github.com/TokenFlux/TokenRouter/internal/payment"
@@ -23,94 +22,133 @@ import (
 	"github.com/TokenFlux/TokenRouter/internal/pkg/apperror"
 )
 
-// epusdt_scenario_integration_test.go authenticates GMPay notifications before
-// applying them to real PostgreSQL orders and billing redemption records.
+// epusdt_scenario_integration_test.go applies verified EPay payment observations
+// through production fulfillment to real PostgreSQL orders and billing redemption records.
 // Concurrent callbacks and reconciliation observations share the production
 // fulfillment lease, while expired orders exercise recovery of late payment.
-// The notification contains a token quantity smaller than its fiat amount,
-// so stored balance assertions detect accidental use of the transfer quantity.
+// Signature and cashier checks are exercised by the provider TLS unit fixtures.
+// These database assertions protect the resulting fiat entitlement separately.
 // Merchant and currency snapshots are persisted before either observation runs.
 //
-// Checkout uncertainty uses one counted provider submission after a real local
-// draft commit. Its returned recovery identity locates the pending row, whose
-// state must remain available for future callbacks. Separate completed-order
-// fixtures supply the buyer and instance, and cleanup removes the additional
-// pending order before releasing those owning fixture records.
+// Checkout failures use one counted provider submission after a real local
+// draft commit. Uncertain results retain the pending row for future callbacks,
+// while explicit rejection marks it failed and releases configuration protection.
+// Separate completed-order fixtures supply the buyer and instance, and cleanup
+// removes the additional order before releasing those owning fixture records.
 
-// epusdtUnconfirmedProvider simulates one submitted checkout with an uncertain response.
-type epusdtUnconfirmedProvider struct {
-	payment.Provider     // unused provider operation delegates
-	calls            int // submitted checkout call count
+// epusdtCreateErrorProvider simulates a submitted checkout returning a classified failure.
+type epusdtCreateErrorProvider struct {
+	payment.Provider       // unused provider operation delegates
+	calls            int   // submitted checkout call count
+	failure          error // configured provider creation failure
 }
 
-// CreatePayment records a single submission and reports an uncertain gateway outcome.
-// Callers inspect the submission count and retain their local order when this
-// classified error is returned for recovery.
-func (p *epusdtUnconfirmedProvider) CreatePayment(context.Context, payment.CreatePaymentRequest) (*payment.CreatePaymentResponse, error) {
+// CreatePayment records one submission and returns the configured failure.
+// Callers inspect whether checkout retains a pending order or marks it failed;
+// the fixture does not contact an external gateway.
+func (p *epusdtCreateErrorProvider) CreatePayment(context.Context, payment.CreatePaymentRequest) (*payment.CreatePaymentResponse, error) {
 	p.calls++
-	return nil, apperror.ServiceUnavailable(payment.CodePaymentCreateUnconfirmed, "unconfirmed fixture checkout")
+	return nil, p.failure
 }
 
-// TestEPUSDTUnconfirmedCreationRetainsPendingOrder simulates a lost checkout response after PostgreSQL draft creation.
-// The caller receives its recovery identity and the provider is invoked once while the persisted order remains pending.
-func TestEPUSDTUnconfirmedCreationRetainsPendingOrder(t *testing.T) {
-	ctx := context.Background()
-	client, _, existing := refundOrderFixture(t, payment.OrderStatusCompleted)
-	instanceID, err := strconv.ParseInt(*existing.ProviderInstanceID, 10, 64)
-	require.NoError(t, err)
-	_, err = client.PaymentProviderInstance.UpdateOneID(instanceID).
-		SetProviderKey(payment.TypeEPUSDT).SetSupportedTypes(payment.TypeEPUSDT).
-		SetPaymentMode("popup").SetRefundEnabled(false).
-		SetConfig(`{"pid":"1001","secretKey":"fixture-secret","apiBase":"https://pay.example","currency":"CNY","notifyUrl":"https://site.example/notify"}`).Save(ctx)
-	require.NoError(t, err)
-	config := paymenttestkit.Configuration(client, &paymentFulfillmentSettingRepoStub{values: map[string]string{
-		payment.SettingPaymentEnabled: "true", payment.SettingEnabledPaymentTypes: payment.TypeEPUSDT,
-	}}, nil)
-	provider := &epusdtUnconfirmedProvider{}
-	checkout := payment.NewCheckout(paymentpostgres.NewOrderStore(client), config,
-		payment.NewDefaultLoadBalancer(paymentpostgres.NewInstanceStore(client), nil), nil,
-		payment.CheckoutRuntime{
-			User: func(context.Context, int64) (*payment.Buyer, error) {
-				return &payment.Buyer{ID: existing.UserID, Status: "active", Email: existing.UserEmail}, nil
-			},
-			CreateProvider: func(string, string, map[string]string) (payment.Provider, error) {
-				return provider, nil
-			},
+// TestEPUSDTCreationFailureLifecycle applies rejected and uncertain checkout results after PostgreSQL draft creation.
+// Rejection releases pending capacity and merchant configuration protection, while uncertainty preserves the order for signed callback recovery.
+func TestEPUSDTCreationFailureLifecycle(t *testing.T) {
+	cases := []struct {
+		name    string // creation failure scenario
+		failure error  // classified provider creation failure
+		status  string // expected persisted order status
+	}{
+		{
+			name:    "unconfirmed",
+			failure: apperror.ServiceUnavailable(payment.CodePaymentCreateUnconfirmed, "unconfirmed fixture checkout"),
+			status:  payment.OrderStatusPending,
+		},
+		{
+			name:    "rejected",
+			failure: errors.New("epusdt EPay checkout was rejected (HTTP 401)"),
+			status:  payment.OrderStatusFailed,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			client, _, existing := refundOrderFixture(t, payment.OrderStatusCompleted)
+			instanceID, err := strconv.ParseInt(*existing.ProviderInstanceID, 10, 64)
+			require.NoError(t, err)
+			_, err = client.PaymentProviderInstance.UpdateOneID(instanceID).
+				SetProviderKey(payment.TypeEPUSDT).
+				SetSupportedTypes(payment.TypeEPUSDT).
+				SetPaymentMode("popup").
+				SetRefundEnabled(false).
+				SetConfig(`{"pid":"1001","secretKey":"fixture-secret","apiBase":"https://pay.example","currency":"CNY","notifyUrl":"https://site.example/notify"}`).
+				Save(ctx)
+			require.NoError(t, err)
+			config := paymenttestkit.Configuration(client, &paymentFulfillmentSettingRepoStub{values: map[string]string{
+				payment.SettingPaymentEnabled: "true", payment.SettingEnabledPaymentTypes: payment.TypeEPUSDT,
+			}}, nil)
+			provider := &epusdtCreateErrorProvider{failure: tc.failure}
+			checkout := payment.NewCheckout(paymentpostgres.NewOrderStore(client), config,
+				payment.NewDefaultLoadBalancer(paymentpostgres.NewInstanceStore(client), nil), nil,
+				payment.CheckoutRuntime{
+					User: func(context.Context, int64) (*payment.Buyer, error) {
+						return &payment.Buyer{ID: existing.UserID, Status: "active", Email: existing.UserEmail}, nil
+					},
+					CreateProvider: func(string, string, map[string]string) (payment.Provider, error) {
+						return provider, nil
+					},
+				})
+			_, createErr := checkout.CreateOrder(ctx, payment.CreateOrderRequest{
+				UserID: existing.UserID, Amount: 20, PaymentType: payment.TypeEPUSDT,
+				ReturnURL: "https://site.example/payment/result", SrcHost: "site.example",
+			})
+			var appErr *apperror.ApplicationError
+			require.ErrorAs(t, createErr, &appErr)
+			current, err := client.PaymentOrder.Query().Where(
+				paymentorder.UserIDEQ(existing.UserID),
+				paymentorder.IDNEQ(existing.ID),
+			).Only(ctx)
+			require.NoError(t, err)
+			// Remove the new order before its owning user and provider fixtures are
+			// released; test context cancellation has already happened when cleanup runs.
+			t.Cleanup(func() {
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				require.NoError(t, client.PaymentOrder.DeleteOneID(current.ID).Exec(cleanupCtx))
+			})
+			require.Equal(t, tc.status, current.Status)
+			require.Empty(t, current.PaymentTradeNo)
+			require.Equal(t, 1, provider.calls)
+			pendingCount, err := config.ConfigCountPendingOrders(ctx, instanceID)
+			require.NoError(t, err)
+			_, updateErr := config.UpdateProviderInstance(ctx, instanceID, payment.UpdateProviderInstanceRequest{
+				Config: map[string]string{"secretKey": "rotated-secret"},
+			})
+			if tc.status == payment.OrderStatusPending {
+				require.Equal(t, payment.CodePaymentCreateUnconfirmed, appErr.Reason)
+				require.Equal(t, strconv.FormatInt(current.ID, 10), appErr.Metadata["order_id"])
+				require.Equal(t, current.OutTradeNo, appErr.Metadata["out_trade_no"])
+				require.Equal(t, 1, pendingCount)
+				require.Equal(t, "PENDING_ORDERS", apperror.Reason(updateErr))
+			} else {
+				require.Equal(t, "PAYMENT_GATEWAY_ERROR", appErr.Reason)
+				require.Zero(t, pendingCount)
+				require.NoError(t, updateErr)
+			}
+			_, err = config.UpdateProviderInstance(ctx, instanceID, payment.UpdateProviderInstanceRequest{
+				SupportedTypes: []string{},
+			})
+			require.Equal(t, "VALIDATION_ERROR", apperror.Reason(err))
+			refundEnabled := true
+			_, err = config.UpdateProviderInstance(ctx, instanceID, payment.UpdateProviderInstanceRequest{
+				RefundEnabled: &refundEnabled,
+			})
+			require.Equal(t, "REFUND_UNSUPPORTED", apperror.Reason(err))
 		})
-	_, err = checkout.CreateOrder(ctx, payment.CreateOrderRequest{
-		UserID: existing.UserID, Amount: 20, PaymentType: payment.TypeEPUSDT,
-		ReturnURL: "https://site.example/payment/result", SrcHost: "site.example",
-	})
-	var appErr *apperror.ApplicationError
-	require.ErrorAs(t, err, &appErr)
-	require.Equal(t, payment.CodePaymentCreateUnconfirmed, appErr.Reason)
-	orderID, err := strconv.ParseInt(appErr.Metadata["order_id"], 10, 64)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, client.PaymentOrder.DeleteOneID(orderID).Exec(context.Background()))
-	})
-	current, err := client.PaymentOrder.Get(ctx, orderID)
-	require.NoError(t, err)
-	require.Equal(t, payment.OrderStatusPending, current.Status)
-	require.Empty(t, current.PaymentTradeNo)
-	require.Equal(t, current.OutTradeNo, appErr.Metadata["out_trade_no"])
-	require.Equal(t, 1, provider.calls)
-	_, err = config.UpdateProviderInstance(ctx, instanceID, payment.UpdateProviderInstanceRequest{
-		Config: map[string]string{"secretKey": "rotated-secret"},
-	})
-	require.Equal(t, "PENDING_ORDERS", apperror.Reason(err))
-	_, err = config.UpdateProviderInstance(ctx, instanceID, payment.UpdateProviderInstanceRequest{
-		SupportedTypes: []string{},
-	})
-	require.Equal(t, "VALIDATION_ERROR", apperror.Reason(err))
-	refundEnabled := true
-	_, err = config.UpdateProviderInstance(ctx, instanceID, payment.UpdateProviderInstanceRequest{
-		RefundEnabled: &refundEnabled,
-	})
-	require.Equal(t, "REFUND_UNSUPPORTED", apperror.Reason(err))
+	}
 }
 
-// TestEPUSDTConcurrentAndLatePaymentCreditsOnce runs authenticated GMPay observations against PostgreSQL.
+// TestEPUSDTConcurrentAndLatePaymentCreditsOnce runs verified EPUSDT EPay observations against PostgreSQL.
 // Replays and competing payment observations credit fiat entitlement once, including after local expiry.
 func TestEPUSDTConcurrentAndLatePaymentCreditsOnce(t *testing.T) {
 	for _, initialStatus := range []string{payment.OrderStatusPending, payment.OrderStatusExpired} {
@@ -136,16 +174,10 @@ func TestEPUSDTConcurrentAndLatePaymentCreditsOnce(t *testing.T) {
 			require.NoError(t, err)
 			adapter, err := paymentadapter.NewEPUSDT(*order.ProviderInstanceID, config)
 			require.NoError(t, err)
-			mac := hmac.New(sha256.New, []byte("fixture-secret"))
-			_, _ = mac.Write([]byte("actual_amount=7&amount=50&order_id=" + order.OutTradeNo + "&pid=1001&status=2&trade_id=gateway_trade"))
-			payload, err := json.Marshal(map[string]any{
-				"actual_amount": 7, "amount": 50, "order_id": order.OutTradeNo,
-				"pid": "1001", "status": 2, "trade_id": "gateway_trade",
-				"signature": hex.EncodeToString(mac.Sum(nil)),
-			})
-			require.NoError(t, err)
-			notification, err := adapter.VerifyNotification(ctx, string(payload), nil)
-			require.NoError(t, err)
+			notification := &payment.PaymentNotification{
+				OrderID: order.OutTradeNo, TradeNo: "gateway_trade", Amount: 50,
+				Status: payment.ProviderStatusSuccess, Metadata: adapter.MerchantIdentityMetadata(),
+			}
 			repo := billingpostgres.NewRedeemCodeRepository(client)
 			reader := &fulfillmentBalance{getByIDUser: &billing.UserSummary{ID: order.UserID}}
 			mutations := billingpostgres.NewRedeemMutations(client, billingpostgres.RedeemWriters{Balances: billingpostgres.NewBalanceStore(client)})

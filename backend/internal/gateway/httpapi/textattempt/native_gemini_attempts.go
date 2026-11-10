@@ -119,7 +119,8 @@ func (b *nativeGeminiAttemptBridge) FirstSelectionFailure(err error, _ bool) {
 // Acquire adopts Gemini provider ownership or registers waiting before bounded
 // slot acquisition. Missing plans and denied queue admission write Google
 // errors. The returned ownership is wrapped for request cancellation and later
-// forwarding cleanup.
+// forwarding cleanup. Acceptance freezes initial HTTP admission before sticky
+// persistence; retries preserve that first endpoint and isolate later waiting.
 //
 // Only allowed wait registrations are released, and WaitResult itself decides
 // whether a counter was confirmed. Successful waiting removes queue occupancy
@@ -132,7 +133,9 @@ func (b *nativeGeminiAttemptBridge) Acquire() bool {
 	// waiting replaces the release callback only after its provider slot is
 	// actually obtained.
 	b.providerReleaseFunc = b.selection.ReleaseFunc
-	if !b.selection.Acquired {
+	if b.selection.Acquired {
+		gatewayhttp.MarkOpsProviderSlotAcquired(b.c)
+	} else {
 		if b.selection.WaitPlan == nil {
 			gatewayhttp.MarkOpsRoutingCapacityLimited(b.c)
 			gatewayhttp.WriteGoogleError(b.c, http.StatusServiceUnavailable, "No available Gemini providers")
@@ -186,6 +189,7 @@ func (b *nativeGeminiAttemptBridge) Acquire() bool {
 			waitEntry.Release()
 			providerWaitCounted = false
 		}
+		gatewayhttp.MarkOpsProviderSlotAcquired(b.c)
 		// Sticky persistence failure leaves the acquired slot available
 		// to this attempt; keep the warning while returning ownership
 		// with its cancellation-safe release.
@@ -240,6 +244,9 @@ func (b *nativeGeminiAttemptBridge) Forward(state textflow.AttemptState) textflo
 			return textflow.Outcome{Err: err, Stop: true}
 		}
 	}
+	// Capture after admission and pricing so queue heartbeats cannot become real
+	// output attributed to this forwarding attempt when deciding whether to retry.
+	before := gatewayhttp.HeartbeatAdjustedWrittenSize(b.c)
 	var err error
 	sessionGroupID := derefGroupID(b.apiKey.GroupID)
 	if b.provider.Record.Platform == capability.PlatformAntigravity {
@@ -258,8 +265,9 @@ func (b *nativeGeminiAttemptBridge) Forward(state textflow.AttemptState) textflo
 		b.result, err = b.binding().forwardGeminiNative(requestCtx, b.c, b.provider, b.modelName, b.action, b.stream, b.body)
 	}
 	b.binding().reportSchedule(b.selection, b.provider.Record.ID, err == nil, b.result)
-	out := textflow.Outcome{Attempt: messageObservedAttempt(b.result, err), Err: err, HasResult: b.result != nil}
+	out := textflow.Outcome{Attempt: messageObservedAttempt(b.result, err), Err: err, HasResult: b.result != nil, OutputChanged: gatewayhttp.HeartbeatAdjustedWrittenSize(b.c) != before}
 	out.Attempt.HTTPCommitted = b.c.Writer.Written()
+	out.Attempt.RetryCommitted = out.OutputChanged
 	if retry, ok := errors.AsType[*forwardcore.UpstreamFailoverError](err); ok {
 		out.Failure = &textflow.AttemptFailure{Cause: err, Policy: retry.RetryFailure()}
 	}

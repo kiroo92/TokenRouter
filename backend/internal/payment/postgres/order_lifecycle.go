@@ -19,7 +19,7 @@ import (
 // processing rows, so status changes can remove candidates before provider
 // queries. Fulfillment candidates require payment confirmation time and an
 // elapsed retry or stale-lease delay, while pending reconciliation chooses
-// older unexpired Alipay/WeChat/GMPay references.
+// older unexpired Alipay/WeChat/EPUSDT EPay references.
 //
 // Ordinary timeout handling reads expired pending rows and lets the lifecycle
 // query upstream before closing. Administrator force expiration instead owns a
@@ -89,7 +89,7 @@ func (s *OrderStore) ExpiredPending(ctx context.Context, now time.Time) ([]*paym
 	return orderValues(rows), err
 }
 
-// PendingReconciliation reads unexpired pending Alipay/WeChat/GMPay method or
+// PendingReconciliation reads unexpired pending Alipay/WeChat/EPUSDT EPay method or
 // provider rows, oldest creation first and bounded by the supplied limit.
 // Canonical or underscore-prefixed labels qualify; lifecycle queries each
 // candidate before deciding payment progress.

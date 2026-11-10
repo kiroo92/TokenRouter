@@ -8,7 +8,7 @@ import {
   buildPersistedModelRestriction,
 } from '@/composables/useModelWhitelist'
 import { clearLegacyResponsesWSSettings } from '@/utils/responsesWsConnection'
-import { applyCodexImageToolMode } from '@/utils/codexImageToolMode'
+import { applyCodexImageToolMode, applyCodexImageResponsesModel } from '@/utils/codexImageToolMode'
 import { normalizeLegacyOpenAIExtra } from '@/utils/openaiLegacyConfiguration'
 import {
   buildUpstreamBalanceAlert,
@@ -142,12 +142,14 @@ export function applyProviderExtraPatch(
     openAICompactMode,
     openAINativeCompactionV2Mode,
     openAIResponsesContinuationSupported,
+    openAIImagesGIFEnabled,
     openAIImagesURLToB64JSON,
     responsesWSConnectionMode,
     codexCLIOnlyAllowClaudeCodeEnabled,
     openAIOAuthClientPolicy,
     codexFingerprintMode,
     codexImageToolMode,
+    codexImageResponsesModel,
     anthropicPassthroughEnabled,
     anthropicAPIKeyAuthScheme,
     webSearchEmulationMode,
@@ -359,6 +361,10 @@ export function applyProviderExtraPatch(
     // Normalize the copied OpenAI extra settings before applying current controls so
     // obsolete compaction and forwarding fields do not survive the edit.
     const newExtra = normalizeLegacyOpenAIExtra(currentExtra)
+    if (provider.type === 'oauth' || provider.type === 'apikey') {
+      if (openAIImagesGIFEnabled.value) delete newExtra.images_gif_enabled
+      else newExtra.images_gif_enabled = false
+    }
     const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
     newExtra.responses_ws_connection_mode = responsesWSConnectionMode.value
     clearLegacyResponsesWSSettings(newExtra)
@@ -412,8 +418,8 @@ export function applyProviderExtraPatch(
     }
 
     applyCodexImageToolMode(newExtra, codexImageToolMode.value)
-
     if (provider.type === 'oauth') {
+      applyCodexImageResponsesModel(newExtra, codexImageResponsesModel.value)
       newExtra.openai_oauth_client_policy = openAIOAuthClientPolicy.value
       if (openAIOAuthClientPolicy.value === 'codex_only') {
         newExtra.codex_cli_only = true

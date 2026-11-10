@@ -107,8 +107,8 @@ const switching = ref(false)
  */
 const currentLocaleCode = computed(() => locale.value)
 /**
- * currentLocale resolves the catalog entry that supplies the current locale flag,
- * name, and short code.
+ * currentLocale resolves the catalog entry whose display name and flag identify the
+ * selected language in the trigger and menu.
  */
 const currentLocale = computed(() => availableLocales.find((l) => l.code === locale.value))
 /**

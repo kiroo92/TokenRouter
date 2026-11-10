@@ -19,12 +19,10 @@ import (
 	"github.com/TokenFlux/TokenRouter/internal/routing/capability"
 )
 
-// candidateAttributeRepo supplies protocol-scoped attributes for candidate eligibility tests.
-type candidateAttributeRepo struct {
-	failure                          error                         // configured profile read failure
-	routing.ModelAttributeRepository                               // unused attribute repository operations
-	config                           *routing.ModelAttributeConfig // configured route capability rules
-}
+// candidate_policy_test.go checks provider selection against final model and
+// protocol capabilities. Mixed-provider fixtures exercise model mapping,
+// hosted image tools, and GIF restrictions while distinguishing a locally
+// unsupported route from an available alternative.
 
 // TestMixedGroupImageCandidateUsesFinalMappedModel maps an image alias through
 // a wildcard provider scope. A text target is rejected and an image-generation
@@ -37,11 +35,6 @@ func TestMixedGroupImageCandidateUsesFinalMappedModel(t *testing.T) {
 	require.Equal(t, "MODEL_CAPABILITY_UNKNOWN", selector.candidateEligibilityReason(ctx, &value, "", "image-alias", false, ""))
 	value.Record.Credentials["model_mapping"] = map[string]any{"image-alias": "gpt-image-1"}
 	require.Empty(t, selector.candidateEligibilityReason(ctx, &value, "", "image-alias", false, ""))
-}
-
-// ForGroup returns the configured profile or read failure for this selection.
-func (r candidateAttributeRepo) ForGroup(context.Context, int64) (*routing.ModelAttributeConfig, error) {
-	return r.config, r.failure
 }
 
 // TestImageCandidateProtocolOverride declares image output on one upstream protocol.
@@ -168,4 +161,24 @@ func TestImageToolSelectionUsesConvertedDefault(t *testing.T) {
 	ctx = media.WithResponsesImageSelection(ctx, []byte(`{"tools":[{"type":"image_generation"}]}`), false)
 	require.Empty(t, candidateOutputEligibility(ctx, &value, "canvas"))
 	require.Equal(t, []string{""}, media.ResponsesImageSelectionFromContext(ctx).Models)
+}
+
+// TestGIFCandidateUsesProviderSwitch checks native and Responses GIF requirements.
+// Disabled providers are rejected independently of model support; a new request
+// sees an enabled switch while a streaming-only native endpoint remains ineligible.
+func TestGIFCandidateUsesProviderSwitch(t *testing.T) {
+	value := mixedGroupProvider(1, capability.PlatformOpenAI, "*", 91)
+	value.Record.Type = providercore.ProviderTypeAPIKey
+	value.Record.Extra = map[string]any{"images_gif_enabled": false}
+	group := &routing.Group{ID: 91, AllowedProtocols: []capability.ProtocolID{capability.ProtocolImagesGenerations, capability.ProtocolOpenAIResponses}}
+	base := requeststate.WithClientProtocol(requeststate.WithGroup(context.Background(), group), capability.ProtocolImagesGenerations)
+	ctx := context.WithValue(routing.WithModelAttributes(base, &routing.ModelAttributeService{Catalog: routing.ModelAttributeCatalog{View: testkit.OfflineView}}), imageModelRequiredKey{}, true)
+	ctx = media.WithImageGIFRequirement(ctx, true)
+	require.Equal(t, "IMAGE_GIF_UNSUPPORTED", candidateOutputEligibility(ctx, &value, "gpt-image-2.6-flare"))
+	value.Record.Extra["images_gif_enabled"] = true
+	require.Empty(t, candidateOutputEligibility(ctx, &value, "gpt-image-2.6-flare"))
+	value.Record.Credentials["images_generations_mode"] = "streaming"
+	require.Equal(t, "IMAGE_GIF_UNSUPPORTED", candidateOutputEligibility(ctx, &value, "gpt-image-2.6-flare"))
+	value.Record.Type = providercore.ProviderTypeOAuth
+	require.Empty(t, candidateOutputEligibility(ctx, &value, "gpt-image-2.6-flare"))
 }

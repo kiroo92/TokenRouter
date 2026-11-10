@@ -36,6 +36,7 @@ var nativeHTTPProviders = wire.NewSet(
 	billinghttp.NewAdminSubscriptionHandler,
 	sitehttp.NewAnnouncementHandler,
 	sitehttp.NewAdminAnnouncementHandler,
+	provideOpsWSOptions,
 	opshttp.NewOpsHandler,
 	provideChannelMonitor,
 )

@@ -8,6 +8,7 @@
 - [路由族](#路由族)：URL 前缀、认证方式和负责的模块。
 - [充值赠送接口](#recharge_bonus_api)：活动公开展示、购买预览和订单赠送字段。
 - [支付管理恢复](#payment_admin_recovery)：订单强制过期和退款查单。
+- [用户专属充值倍率](#personal_recharge_multiplier_api)：管理员覆盖值、排序和用户充值预览。
 - [身份登录接口](#身份登录接口)：修改 OAuth start、人机验证和 One Tap 时读取。
 - [创作台接口](#创作台接口)：修改工作区、任务和输出交付时读取。
 - [提供商管理接口](#提供商管理接口)：修改批量管理、测试、诊断和导入时读取。
@@ -31,7 +32,7 @@
 
 ## 全局入口
 
-`SetupRouter` 在一个 Gin engine 上安装 app 提供的共同中间件和注册函数。common 路由由 server 注册；app 按顺序挂载 auth、user、admin、gateway、payment 和 page 路由，各模块的注册函数在各自的 HTTP 适配层里。综合设置的 GET 和 PUT 属于 `settings/httpapi`，预聚合有自己的处理器，创作模型候选和 worker 状态属于 `creative/httpapi`。输出格式的映射由所属的 HTTP 模块提供。主要的全局顺序：
+`SetupRouter` 在一个 Gin engine 上安装 app 提供的共同中间件和注册函数。common 路由由 server 注册；app 按顺序挂载 auth、user、admin、plugin、gateway、payment 和 page 路由，各模块的注册函数在各自的 HTTP 适配层里。综合设置的 GET 和 PUT 属于 `settings/httpapi`，预聚合有自己的处理器，创作模型候选和 worker 状态属于 `creative/httpapi`。输出格式的映射由所属的 HTTP 模块提供。主要的全局顺序：
 
 ```text
 RequestLogger
@@ -55,6 +56,10 @@ RequestLogger
 | `/api/event_logging/batch` | 无 | 兼容 Claude Code 遥测的空接收端，固定返回成功 |
 | `/api/v1/auth/*` | 大多公开，账户管理的子流程按路由加 JWT 或短期状态 | `app/http_routes.go`；注册、登录、刷新、找回密码、OAuth、Passkey 登录和身份补全 |
 | `/api/v1/user/*`、`/keys`、`/team`、`/groups`、`/subscriptions`、`/redeem` 等 | 用户 JWT | `app/http_routes.go`；用户面板的资源、团队、Key、用量和权益查询 |
+| `/api/v1/marketplace/models`、`/api/v1/marketplace/stats` | 无 | `routing/httpapi`；公开模型分组和首页汇总 |
+| `/api/v1/marketplace/models/available` | 用户 JWT | `routing/httpapi`；公开分组和当前用户获授权的专属分组，使用私有、不缓存的响应 |
+| `/api/v1/admin/plugins*`、`/api/v1/admin/plugin-catalog*`、`/api/v1/admin/plugin-indexes*` | 管理员，执行代码与来源变更另需 step-up | `plugin/httpapi`；安装、更新回滚、市场与索引来源，见[安装管理](plugin_contracts.md#administration) |
+| `/api/v1/plugins/*` | UI 描述要求用户 JWT，资源公开，API 按 manifest 选择认证 | `plugin/httpapi`；插件页面描述、版本化静态资源和非流式 HTTP 代理，见[插件契约](plugin_contracts.md#http_contributions) |
 | `/api/v1/admin/*` | 管理员 JWT 或受限的管理密钥；部分操作还需要 step-up | `app/http_routes_admin.go`；用户、分组、提供商、价格配置、设置、运维、备份、支付和安全管理 |
 | `/mcp` | 专用 MCP Bearer 令牌 | 四个通用管理工具，按具体操作授权；协议为 MCP JSON-RPC，见 [MCP 管理接口](mcp_management.md) |
 | `/api/v1/payment/*` | 用户 JWT | `app/http_routes.go`；读取配置和套餐、下单、查单、取消、invoice 和申请退款 |
@@ -70,7 +75,7 @@ RequestLogger
 
 - 提供商：管理端展示值和脱敏映射在 `provider/httpapi/dto`，代理展示值在 `egress/httpapi/dto`。敏感字段、省略和空集合的处理、代理管理员字段的范围都按既定格式输出；非敏感的嵌套 map、slice 和时间指针各用独立副本，修改展示结果不会影响提供商配置。提供商备份、即时和计划测试、API Key 上游用量查询使用 `provider/httpapi`；提供商的增删改查、列表、复制和恢复、批量管理、凭据字段更新、刷新和重新授权、隐私、调度开关、额度重置和健康恢复绑定 `provider/httpapi.ManagementHandler`；模型目录、实时模型同步、tier 和详细统计也走这里。高级调度诊断绑定 `scheduler/httpapi.DiagnosticsHandler`。
 - 设置：综合设置由 `settings/httpapi` 组合各领域的端点；SMTP、预聚合和创作状态分别调用各自的处理器。备份导出需要 step-up，导入使用管理员的幂等 helper。
-- 订阅、兑换和套餐：用户端和管理端的 handler 和 DTO 在 `billing/httpapi`。URL、认证和幂等中间件的顺序、reason、CSV、分页排序都按既定格式。用户兑换历史 `GET /api/v1/redeem/history` 按 `page`、`page_size` 返回标准分页结构，按使用时间倒序，普通用户看到的数据不含 `notes`。管理员看到的套餐保持 Ent 的字段省略和 `edges` 格式，公开套餐使用单独整理过的数据。
+- 订阅、兑换和套餐：用户端和管理端的 handler 和 DTO 在 `billing/httpapi`。URL、认证和幂等中间件的顺序、reason、CSV、分页排序都按既定格式。用户兑换历史 `GET /api/v1/redeem/history` 按 `page`、`page_size` 返回标准分页结构，按使用时间倒序，用户历史对管理员调账和插件余额调整返回可见的 `notes`，其中插件记录包含插件 ID 和操作原因；其他兑换码隐藏内部备注。管理员看到的套餐保持 Ent 的字段省略和 `edges` 格式，公开套餐使用单独整理过的数据。
 - 身份、团队和 Key：用户资料、会话、七类身份、强认证和用户管理在 `identity/httpapi`，团队在 `team/httpapi`，Key 的生命周期和凭据在 `apikey/httpapi`。app 组装同一组身份处理器；微信支付 OAuth 在 `payment/httpapi` 里单独接入。HTTP 适配层保持历史的 DTO 格式和凭据差异，安全的 `Principal` 表示身份，Key 的 `AccessSnapshot` 表示付款和成员上下文。
 
 `GET /api/v1/admin/usage/stats` 的可选参数 `endpoint_source` 接受 `inbound`、`upstream`、`path`，选择附带的端点统计；省略、空值或 `all` 返回全部端点维度，其他值返回 400。摘要字段照常返回，缓存按端点来源分别保存。管理页面先加载摘要和入站端点，切换图表后才读取上游端点或路径；筛选变化和页面退出会取消过期的端点请求。
@@ -84,6 +89,13 @@ RequestLogger
 客户端错误由 `gateway/httpapi` 写出，错误规则和它的管理在 `gateway/errorpolicy`。错误规则只改变返回给客户端的内容和是否跳过监控，提供商健康、重试和扣费资格都不受影响。停止时，请求和平台尝试共用 app 的进入屏障；在途请求的尾部完成后，才停止完成队列；超时时报告哪些阶段没完成、由谁持有。
 
 网站展示请求使用 `Accept-Language`，语言和回退规则见[用户侧国际化](user_localization.md)。`GET /api/v1/settings/legal/:id` 按语言返回协议，账户资料的 `preferred_locale` 用于保存用户选择。
+
+<a id="social_share_image"></a>
+### 社交分享封面
+
+`GET/HEAD /api/v1/settings/share-image/:hash` 无须登录，返回当前已保存封面的图片字节，继承公开设置接口的限流。地址中的 SHA-256 摘要必须与当前图片一致；图片已替换、已移除或摘要错误时返回 404，存储故障返回错误响应。
+
+成功响应包含实际图片 Content-Type、`X-Content-Type-Options: nosniff`、摘要 ETag，以及 `public, max-age=3600, must-revalidate`。支持条件请求与 HEAD。错误响应使用 `no-store`。更换图片生成新地址；移除图片后源站停止提供旧内容，但客户端和平台此前缓存的图片可能仍然显示。
 
 <a id="site_pages"></a>
 ### 站点页面
@@ -114,10 +126,21 @@ Markdown 正文需要 JWT，并且菜单可见；管理员页面只对管理员�
 
 公开活动和购买接口按 `Accept-Language` 返回选定语言的运营文本，管理配置另带 `recharge_bonus_localization` 的完整内容和版本。页面切换语言时重新加载活动数据。首次确认成功付款时，服务端在 `PAID` 事务固化实际累计和赠送；时段资格同样取这次确认的 `paid_at`。时段加赠按每笔基础到账独立计算，不占用固定奖励上限。管理员设置字段、部分更新和校验规则见[充值赠送设置](configuration.md#recharge_bonus_settings)，金额、返利与退款规则见[充值赠送与活动页](../domains/payments_and_entitlements.md#recharge_bonus)。
 
+<a id="personal_recharge_multiplier_api"></a>
+## 用户专属充值倍率
+
+管理员用户列表、详情和更新响应包含可空数字 `balance_recharge_multiplier`。`PUT /api/v1/admin/users/:id` 省略该字段时保留原值，传 null 时清除覆盖，传有限正数时设置覆盖；其他数值返回 `INVALID_BALANCE_RECHARGE_MULTIPLIER`。普通用户的资料更新没有这个可写字段。
+
+`GET /api/v1/admin/users` 支持 `sort_by=balance_recharge_multiplier` 和 `sort_order=asc|desc`，数值排序后按同方向用户 ID 排序，NULL 始终末尾。MCP 的 `users.update` 使用相同字段与语义。
+
+`GET /api/v1/payment/checkout-info` 需要当前用户身份，返回 `balance_recharge_multiplier`（实际倍率）、`default_balance_recharge_multiplier`（全局倍率）和 `user_balance_recharge_multiplier`（可空的专属倍率）。下单接口不接收用户指定的倍率，服务端读取当前条款。资金快照规则见[用户专属充值倍率](../domains/payments_and_entitlements.md#personal_recharge_multiplier)。
+
+创建订单的 `order_type` 省略或空串表示 `balance`，其他有效值只有 `subscription`。未知值返回 `INVALID_CHECKOUT_ORDER_TYPE`。余额到账金额舍入后为零、非有限值或达到 1 万亿时，返回 `INVALID_CREDITED_AMOUNT`；两类错误均在订单保存和渠道支付创建之前返回 HTTP 400。
+
 <a id="payment_admin_recovery"></a>
 ## 支付管理恢复
 
-`POST /api/v1/payment/webhook/epusdt` 接收 GMPay 签名 JSON，成功返回 HTTP 200 和纯文本 `success`。该路由通过商户验签和订单绑定授权。下单返回 `PAYMENT_CREATE_UNCONFIRMED`（503）时，`metadata` 提供 `order_id`、`out_trade_no`、`amount`、`pay_amount`、`currency` 和 `expires_at`，购买页使用它们继续查看已创建订单，规则见 [GMPay 加密货币支付](../domains/payments_and_entitlements.md#epusdt_payments)。
+`GET/POST /api/v1/payment/webhook/epusdt` 接收 EPay（易支付）MD5 签名的 query 或 form，成功返回 HTTP 200 和纯文本 `success`。该路由通过商户验签、收银台付款查询和订单绑定授权。下单返回 `PAYMENT_CREATE_UNCONFIRMED`（503）时，`metadata` 提供 `order_id`、`out_trade_no`、`amount`、`pay_amount`、`currency` 和 `expires_at`，购买页使用它们继续查看已创建订单，规则见 [EPUSDT 加密货币支付（EPay 协议）](../domains/payments_and_entitlements.md#epusdt_payments)。
 
 支付、推广和 Promo 的路由分别绑定 `payment/httpapi` 和 `promotion/httpapi`。Webhook 按原始的 body、query 和 Header 验签。
 
@@ -332,6 +355,8 @@ app 为所有需要幂等的用户和管理员 HTTP 处理器绑定同一个协�
 }
 ```
 
+插件 API 代理的有效响应保留插件原始 body 和 HTTP 状态，不使用宿主 envelope；代理自身的鉴权、路由和传输错误仍使用面板错误格式。UI 描述和插件管理接口继续使用普通 envelope。
+
 业务错误由 `ApplicationError` 映射成 HTTP status，可以带 `reason` 和字符串 `metadata`。未知错误按 500 处理，详情脱敏后只记在服务端。分页数据使用 `items`、`total`、`page`、`page_size` 和 `pages`；创建和异步接受分别可以返回 201 和 202。
 
 错误实体只在 `pkg/apperror` 定义，HTTP 映射和面板 envelope 在 `server/httpx`。使用方直接使用具名的错误类别，code 数值、字段、`errors.Is/As`、cause 和 metadata 的复制方式都保持兼容；自定义状态码按原值映射。
@@ -342,9 +367,11 @@ app 为所有需要幂等的用户和管理员 HTTP 处理器绑定同一个协�
 
 `request_body_read_ms`、`preprocess_ms`、`user_slot_wait_ms`、`provider_slot_wait_ms` 分解 HTTP 首次准入前的耗时。原始 Body 的读取才计入读取时间，容量检查执行时间属于其他处理，等待只统计检查之间的排队。`retry_provider_slot_wait_ms` 单列后续等待。`provider_slot_acquired_ms` 是首次取得执行资格的时刻；它与连接、发送、响应和输出事件都不能作为时长相加。
 
+启用 HTTP 文本计时的请求在尝试适配器接收调度器已取得的槽位或排队取得槽位后记录准入，先于后续的粘性绑定和上游执行。首次成功将 `timing_admitted` 置为 `1`，冻结前述四段耗时和槽位时刻；重试取得槽位不会移动这个时刻。始终未取得槽位的请求保留 `timing_admitted=0`，不生成槽位时刻。原生 Gemini 和 Antigravity 专用入口遵循同一规则。
+
 首事件允许正常元数据，排除心跳和空的保活 delta。有效内容包含正文、明文思考、工具名称及实际参数，排除单独的角色、ID、空占位、签名和密文；重复的完整终态不延长内容输出区间。`first_visible_output_ms` 表示成功写入最终下游 writer，`first_downstream_flush_ms` 表示包含上游事件的首次 HTTP Flush，可由元数据触发。二者不证明客户端已经收到或渲染内容，本地产生的错误与排队心跳不建立这些交付指标。
 
-TPS 使用同一上游尝试的 `输出 token × 1000 /（最后有效内容时刻 − 首个有效内容时刻）`，由服务端统一保留一位小数。上游须正常完成、usage 完整、输出 token 为正、至少有两次新增有效内容且时间区间为正，否则没有 TPS。它按数据块估算，受网络、背压、合并发送及未明文输出的思考影响，首字／首包设置不改变它的计算。
+TPS 表示平均输出速度，使用同一上游尝试的 `输出 token × 1000 /（最后有效内容时刻 − 上游调用开始时刻）`，由服务端统一保留一位小数。上游须为流式并正常完成、usage 完整、输出 token 为正、起止观测齐全且时间区间为正，否则没有 TPS。单块输出也可计算。区间包含本次调用的连接、上游等待、预填充、思考及内容传输时间，排除客户端上传、网关准入排队和之前失败的尝试；最后有效内容之后的 usage、重复完成快照和连接关闭不延长区间。该指标受网络和背压影响，不代表模型内部解码速度，首字／首包设置不改变它的计算。已有完整计时的历史记录在查询时按同一公式计算，缺失观测的记录仍显示未记录。
 
 Chat 流的非空 `finish_reason` 或最终输出 usage 可以确认完成，不要求额外的 `[DONE]`；缺少最终计数时仍不生成 TPS。Responses 的工具名称和输入参数分别记录是否已经到达，因此参数首次出现在 `.done`、完整 item 或完成快照中时仍计入有效输出，之后重复的同类字段不延长区间。
 

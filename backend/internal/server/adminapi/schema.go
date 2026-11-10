@@ -91,6 +91,10 @@ func requestSchema(t reflect.Type, visited map[reflect.Type]bool) *jsonschema.Sc
 	if visited[t] || t == reflect.TypeFor[json.RawMessage]() {
 		return &jsonschema.Schema{}
 	}
+	if t == reflect.TypeFor[json.Number]() {
+		// json.Number retains decimal text internally but emits a JSON number, so its reflected string kind would misdescribe numeric capability limits.
+		return &jsonschema.Schema{Type: "number"}
+	}
 	if t == reflect.TypeFor[time.Time]() {
 		return &jsonschema.Schema{Type: "string", Format: "date-time"}
 	}
@@ -170,8 +174,8 @@ func requestSchema(t reflect.Type, visited map[reflect.Type]bool) *jsonschema.Sc
 
 // JSONResponse describes the shared HTTP envelope and an optional concrete data type.
 // Dynamic responses leave data unconstrained; known DTOs reuse their JSON field
-// shapes. MCP execution adds transport status and applies credential redaction
-// around this underlying HTTP response.
+// shapes. MCP execution adds transport status and can apply field redaction
+// to this underlying HTTP response according to the credential's settings.
 func JSONResponse(body any) *jsonschema.Schema {
 	data := &jsonschema.Schema{}
 	if body != nil {

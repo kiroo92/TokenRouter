@@ -22,7 +22,7 @@ import (
 // streams while retaining terminal usage and response identity.
 // Responses event conversion to Messages emits content-block and message
 // terminal events while tracking upstream usage separately. A terminal's
-// top-level usage overrides nested response usage in this reader, and its
+// nested usage overrides supplied top-level categories in this reader, and its
 // Response ID is retained for result adaptation. Buffered terminal output can
 // be supplemented from earlier deltas before Messages JSON is constructed.
 //
@@ -137,7 +137,7 @@ func ReadMessagesBuffered(resp *http.Response, c *upstream.OutputContext, option
 // executor retains body ownership; timed producer sends stop on return while a
 // blocked scan depends on body closure.
 //
-// Top-level terminal usage overrides nested response usage, and terminal IDs
+// Nested terminal usage overrides supplied top-level categories, and terminal IDs
 // populate ResponseID. Output events and pings mark local output,
 // while cyber policy latches ClientDisconnect even after successful error
 // delivery. Missing terminals are classified through separate pre-output and
@@ -150,6 +150,7 @@ func ReadMessagesStreaming(resp *http.Response, c *upstream.OutputContext, optio
 	state := bridge.NewResponsesEventToAnthropicState(options.Runtime)
 	state.Model = originalModel
 	var usage wire.ForwardUsage
+	var usageAccumulator wire.UsageAccumulator
 	responseID := ""
 
 	clientDisconnected := false
@@ -214,24 +215,23 @@ func ReadMessagesStreaming(resp *http.Response, c *upstream.OutputContext, optio
 		}
 		options.Observe([]byte(payload), event.Type)
 		wire.ParseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
+		// Share accumulated cache observations with the event converter before it
+		// creates terminal Messages usage, including sparse or cache-only updates.
+		if snapshot := usageAccumulator.ObserveResponsesEvent([]byte(payload), &event); snapshot != nil {
+			usage = usageAccumulator.ForwardUsage()
+		}
 
 		eventType := strings.TrimSpace(event.Type)
 		isBareErrorEvent := eventType == "error"
 		isTerminalEvent := IsCompatResponsesTerminalEvent(eventType) || isBareErrorEvent
-		// Apply nested terminal usage before top-level event usage, making the
-		// event record authoritative when both are supplied, including all-zero totals.
+		// Both event locations already contain the same accumulated snapshot.
+		// Retain terminal identity and explicit zero totals without selecting another usage source.
 		if isTerminalEvent {
 			terminalEventType = eventType
 			if event.Response != nil {
 				if id := strings.TrimSpace(event.Response.ID); id != "" {
 					responseID = id
 				}
-				if event.Response.Usage != nil {
-					usage = wire.CopyForwardUsage(event.Response.Usage)
-				}
-			}
-			if event.Usage != nil {
-				usage = wire.CopyForwardUsage(event.Usage)
 			}
 		}
 		if eventType == "response.failed" || isBareErrorEvent {
@@ -388,11 +388,10 @@ func ReadMessagesStreaming(resp *http.Response, c *upstream.OutputContext, optio
 
 	// Snapshot heartbeat spacing for this attempt; client pings use consumed
 	// upstream line time while idle failure checks use the producer's arrival timestamp.
-	keepaliveInterval := options.KeepaliveInterval()
 
 	// With both timer policies disabled, synchronous scanning retains the
 	// same parser and terminal requirement while avoiding queued read-ahead and its producer.
-	if streamInterval <= 0 && keepaliveInterval <= 0 {
+	if streamInterval <= 0 {
 		var parser wire.OpenAICompatSSEFrameParser
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -460,16 +459,6 @@ func ReadMessagesStreaming(resp *http.Response, c *upstream.OutputContext, optio
 	// to interrupt a scanner read blocked after this consumer has returned.
 	defer close(done)
 
-	var keepaliveTicker *time.Ticker
-	if keepaliveInterval > 0 {
-		keepaliveTicker = time.NewTicker(keepaliveInterval)
-		defer keepaliveTicker.Stop()
-	}
-	var keepaliveCh <-chan time.Time
-	if keepaliveTicker != nil {
-		keepaliveCh = keepaliveTicker.C
-	}
-	lastDataAt := time.Now()
 	var parser wire.OpenAICompatSSEFrameParser
 
 	for {
@@ -492,7 +481,7 @@ func ReadMessagesStreaming(resp *http.Response, c *upstream.OutputContext, optio
 				handleScanErr(ev.err)
 				return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", ev.err)
 			}
-			lastDataAt = time.Now()
+
 			line := ev.line
 			if IsCompatDoneSentinelLine(line) {
 				return missingTerminalErr()
@@ -519,29 +508,6 @@ func ReadMessagesStreaming(resp *http.Response, c *upstream.OutputContext, optio
 				zap.Duration("interval", streamInterval),
 			)
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
-
-		case <-keepaliveCh:
-			if clientDisconnected {
-				continue
-			}
-			if time.Since(lastDataAt) < keepaliveInterval {
-				continue
-			}
-			// An Anthropic ping counts as local client output, so subsequent
-			// missing-terminal or failure handling uses the post-output Messages policy
-			// even before content.
-			writeStreamHeaders()
-			if _, err := fmt.Fprint(c.Writer, "event: ping\ndata: {\"type\":\"ping\"}\n\n"); err != nil {
-				// Latch failed ping delivery while keeping upstream read/accounting
-				// processing available until a terminal or another exit determines the attempt outcome.
-				logger.L().Info("openai messages stream: client disconnected during keepalive",
-					zap.String("request_id", requestID),
-				)
-				clientDisconnected = true
-				continue
-			}
-			clientOutputStarted = true
-			c.Writer.Flush()
 		}
 	}
 }

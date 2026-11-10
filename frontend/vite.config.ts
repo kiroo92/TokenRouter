@@ -2,6 +2,9 @@ import { defineConfig, loadEnv, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import checker from 'vite-plugin-checker'
 import { resolve } from 'path'
+// Native config loading requires source extensions; tsconfig.node.json rewrites
+// this extension so emitted JavaScript resolves the compiled metadata module.
+import { renderSocialMetadata } from './socialMetadata.ts'
 
 // vite.config.ts configures development proxying and the browser assets embedded
 // in release builds. Development documents receive public settings and branding
@@ -73,7 +76,8 @@ function injectBranding(
 // settings. Its pre-transform completes before the app reads injected branding and
 // access flags. Unsuccessful or unavailable configuration leaves the template intact
 // so browser startup can request public settings through its normal API path.
-function injectPublicSettings(backendUrl: string): Plugin {
+// devOrigin supplies the local sharing destination when frontend_url is blank.
+function injectPublicSettings(backendUrl: string, devOrigin: string): Plugin {
   return {
     name: 'inject-public-settings',
     apply: 'serve',
@@ -82,7 +86,7 @@ function injectPublicSettings(backendUrl: string): Plugin {
       // handler fetches startup configuration for one development document render.
       // Only a successful API envelope is injected. A request timeout, network
       // failure, or transform error leaves the original document for client loading.
-      async handler(html) {
+      async handler(html, context) {
         try {
           // Bound configuration loading to two seconds so a disconnected backend
           // does not indefinitely delay serving the browser's application document.
@@ -93,7 +97,14 @@ function injectPublicSettings(backendUrl: string): Plugin {
             const data = await response.json()
             if (data.code === 0 && data.data) {
               const script = `<script>window.__APP_CONFIG__=${JSON.stringify(data.data)};</script>`
-              return injectBranding(html, data.data).replace('</head>', `${script}\n</head>`)
+              const metadata = renderSocialMetadata(
+                data.data,
+                new URL(context.path, devOrigin).href,
+              )
+              return injectBranding(html, data.data).replace(
+                '</head>',
+                `${metadata}\n${script}\n</head>`,
+              )
             }
           }
         } catch (e) {
@@ -122,19 +133,21 @@ export default defineConfig(({ mode }) => {
       checker({
         vueTsc: true,
       }),
-      injectPublicSettings(backendUrl),
+      injectPublicSettings(backendUrl, `http://localhost:${devPort}`),
     ],
     resolve: {
       alias: {
         '@': resolve(import.meta.dirname, 'src'),
-        // Use the runtime localization build alongside the configured JIT message compiler.
+        // Host code consumes the SDK's shared error class and constants directly;
+        // published plugin bundles still externalize the full SDK to host globals.
+        '@tokenflux/tokenrouter-plugin-sdk': resolve(
+          import.meta.dirname,
+          '../plugin-sdk/web/src/types.ts',
+        ),
+        // Vue I18n 11 enables CSP-compatible JIT compilation by default; keep
+        // the runtime distribution used by the application and component tests.
         'vue-i18n': 'vue-i18n/dist/vue-i18n.runtime.esm-bundler.js',
       },
-    },
-    define: {
-      // The JIT compiler represents messages as AST objects, allowing interpolation
-      // when the document CSP does not permit dynamically evaluated JavaScript.
-      __INTLIFY_JIT_COMPILATION__: true,
     },
     build: {
       outDir: '../backend/internal/web/dist',

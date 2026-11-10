@@ -12,9 +12,11 @@
 | `router/` | 路由分组、守卫安装、导航进度、标题和首次设置跳转 |
 | `api/`、`api/admin/` | HTTP 客户端、领域请求和响应类型；管理员专有接口位于 admin |
 | `stores/` | 认证、应用设置、公告、订阅、支付等跨页面状态 |
+| `pluginHost/` | 共享 Vue 运行时、插件资源加载、页面能力与 SDK 控件适配 |
 | `views/` | 路由页面，以及按业务归组的页面私有控制器和组件 |
 | `components/common/` | 基础控件与显示组件；表格及其列类型、列顺序逻辑共同放在 table |
 | `components/layout/` | 应用外壳、导航和页面布局 |
+| `components/plugin/` | manifest 字段表单、权限展示和配置数值校验，供插件管理与后续领域表单复用 |
 | `components/<业务>/` | 多个页面共同使用的领域组件；调用方的角色由路由和 API 决定 |
 | `composables/` | 跨页面组合式状态和生命周期逻辑；引导步骤与其控制器放在 onboarding |
 | `utils/` | 共用的转换、格式、存储和浏览器辅助实现；支付规则放在 payment |
@@ -46,11 +48,25 @@ API 记录按所属领域维护在 `api/*.types.ts` 或 `api/admin/*.types.ts`�
 
 类型循环反映实际响应关系：`api/identity.types.ts` 与 `api/subscriptions.types.ts` 通过 `User`、`UserSubscription` 互相引用；`api/admin/providers.types.ts` 与 `api/admin/proxies.types.ts` 通过代理记录、提供商平台和类型互相引用。这两组关系使用 type-only import，保留 HTTP 字段和可空性。
 
-依赖检查集中在 `frontend/scripts/check-imports.mjs`：API 模块不能依赖页面、组件、store、router 或 composable；组件不能依赖 view 实现；共享 composable 不能依赖组件实现。页面私有目录只允许自己的文件、登记的页面所有者及准确的路由入口导入。跨模块行为测试的必要访问按准确的文件与目标记录例外。
+依赖检查集中在 `frontend/scripts/check-imports.mjs`：API 模块不能依赖页面、组件、store、router、composable 或 pluginHost；组件不能依赖 view 或 pluginHost 实现；pluginHost 可组合 API、store 和共享组件，但不能导入 view；共享 composable 不能依赖组件实现。页面私有目录只允许自己的文件、登记的页面所有者及准确的路由入口导入。跨模块行为测试的必要访问按准确的文件与目标记录例外。
 
-`i18n/index.ts` 在发布语言后动态加载 `router/title`、`router/index`、`stores/app`、`stores/auth` 和 `stores/adminSettings`，刷新页面标题并发送语言变化事件。需要持久化账户语言时再加载 `api/client`，按语言代次和用户身份串行写入偏好。这些准确的运行时依赖保持原来的初始化时序；它们不属于 API 向页面依赖的例外。共享工具中存在响应式缓存和浏览器 I/O，阅读调用方后再决定是否提取纯规则。
+`i18n/index.ts` 在发布语言后动态加载 `router/title`、`router/index`、`stores/app`、`stores/auth` 、`stores/adminSettings` 和 `stores/plugins`，刷新页面标题并发送语言变化事件。需要持久化账户语言时再加载 `api/client`，按语言代次和用户身份串行写入偏好。这些准确的运行时依赖保持原来的初始化时序；它们不属于 API 向页面依赖的例外。共享工具中存在响应式缓存和浏览器 I/O，阅读调用方后再决定是否提取纯规则。
+
+插件管理目录 `views/admin/plugins/` 有三个路由入口：`PluginsView.vue` 是插件目录（`/admin/plugins`，query.view 区分已安装、可更新和发现），`PluginDetailView.vue` 是单个插件的详情页（`/admin/plugins/:pluginId`，query.tab 区分概览、配置、额度、日志和版本），`PluginSourcesView.vue` 管理索引来源（`/admin/plugins/sources`）。旧的 `?tab=market` 和 `?tab=indexes` 由路由守卫转到发现视图和来源页。详情页只在安装记录属于 query.source 指定的来源时把插件当作已安装；没有 source 时使用安装记录的来源读取目录条目，上传和开发目录安装没有目录条目。共享字段渲染与权限展示保留在 `components/plugin/`。管理器按写操作串行使用 step-up，成功和失败后都读回安装与菜单状态，避免把网络错误当成未写入的证明。配置和额度是详情页的两个标签，各自保存，失败时保留草稿。安装审阅固定索引身份和版本，换版本会清除之前的权限确认；更新失败保留目标和恢复诊断。
+
+## 插件页面与共享运行时
+
+`stores/plugins.ts` 按账号、角色、语言缓存 UI 描述，并每五分钟刷新。侧栏在自定义菜单之后追加对应 audience 的插件菜单，沿用 SVG 清洗；标题解析按插件 ID、audience 和完整静态路径匹配。普通路径为 `/ext/:pluginId`，管理路径为 `/admin/ext/:pluginId`，子路径与 manifest 一致，不含开头斜杠，根页面为空字符串。
+
+`pluginHost/` 在首次加载前发布共享 Vue 与 SDK，按资源 URL 和完整性摘要复用加载。`views/plugin/PluginPageView.vue` 负责当前选择、一次资源失败重试与错误边界；每个挂载实例提供独立 HostApi 和确认弹窗。退出页面会拒绝该实例的新调用并取消待确认决定。资源保留订阅独立于页面生命周期，登出、禁用和描述变化仍能移除旧资源。完整流程见[插件前端宿主](plugin_system.md#frontend_host)。
+
+宿主通过源码路径引用本地 Web SDK 类型；Vite 只将共享错误类和常量映射到运行时源码。生产插件仍把 SDK 和 Vue 外置，不携带宿主实现。根目录及 deploy Docker 构建在前端安装依赖前复制 Web SDK 源码，后端编译前复制 Go SDK；独立 `backend/Dockerfile` 同样使用仓库根目录作为构建上下文。
 
 ## 启动与验证约束
+
+前端开发、构建和预览命令显式使用 `vite.config.ts`。旧检出目录可能保留此前 TypeScript 编译生成的 `vite.config.js`；即使该文件仍在，项目命令也不加载它。Node 配置编译产物位于 `node_modules/.cache/tsconfig-node`，避免在源码旁生成会遮蔽配置的文件。
+
+Vite 配置中的相对 TypeScript 导入显式写 `.ts` 后缀，以兼容原生配置加载。`tsconfig.node.json` 启用 `rewriteRelativeImportExtensions`，编译输出时将这些导入改写为对应的 JavaScript 扩展名。
 
 应用先设置主题和 viewport，再安装 Pinia 并读取注入配置。语言初始化及公开设置的语言匹配完成后安装路由和 i18n，等待初次路由就绪后挂载。导航进度在鉴权守卫前安装。API Key 页通过 Magpie 网页导入链接传递配置，格式见 [Magpie 导入](../interfaces/magpie_import.md)。
 

@@ -23,11 +23,11 @@ import (
 	"github.com/TokenFlux/TokenRouter/internal/settings"
 )
 
-// Profile HTTP exposes current identity bindings and compatible source fields
-// while email changes use verified binding rather than ordinary profile
-// updates. These scenarios check avatar/profile display, binding and unbinding,
-// session cleanup, password rejection, and authorization-start data using
-// production identity handlers with mutable in-memory user fixtures.
+// identity_http_test.go checks profile HTTP, OAuth settings, and identity bindings.
+// Profile scenarios cover avatar display, session cleanup, password rejection,
+// and authorization starts using production handlers with mutable user fixtures.
+// OAuth settings cases keep automatic callbacks on the request origin even when
+// site addresses and the client API endpoint use other domains or path prefixes.
 
 // userHandlerRepoStub supplies one mutable user and its authentication
 // identities for profile tests.
@@ -60,6 +60,41 @@ type userHandlerSettingRepoStub struct {
 // for identity HTTP assertions.
 type userHandlerRefreshTokenCacheStub struct {
 	revokedUserIDs []int64 // requested session cleanup users
+}
+
+// TestIdentityHTTPSettingsWeChatCallbackUsesRequestOrigin loads channel options
+// through production settings assembly. Stored and deployment site addresses must
+// not move the generated callback away from the host that issued OAuth cookies.
+func TestIdentityHTTPSettingsWeChatCallbackUsesRequestOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name       string // named source scenario
+		stored     string // saved frontend address
+		deployment string // deployment frontend default
+	}{
+		{name: "different site host", stored: "https://console.example.com", deployment: "https://deployment.example.com"},
+		{name: "site path prefix", stored: "https://api.example.com/portal"},
+		{name: "deployment site", deployment: "https://deployment.example.com"},
+		{name: "missing site"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &settingHandlerRepoStub{values: map[string]string{
+				"api_base_url": "https://models.example.com/v1",
+				"frontend_url": tc.stored,
+				identitycore.SettingKeyWeChatConnectEnabled:   "true",
+				identitycore.SettingKeyWeChatConnectAppID:     "app",
+				identitycore.SettingKeyWeChatConnectAppSecret: "secret",
+				identitycore.SettingKeyWeChatConnectMode:      "open",
+			}}
+			cfg := &config.Config{Site: config.SiteConfig{FrontendURL: tc.deployment}}
+			runtime := identityHTTPSettings{identityAuthSettings: newUserBindingSettings(repo, cfg)}
+			handler := identityhttp.NewWeChatHandler(nil, nil, nil, identityhttp.WeChatHTTPOptions{LoadConfig: runtime.WeChat})
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "https://api.example.com/api/v1/auth/oauth/wechat/start", nil)
+			options, err := handler.GetConfig(t.Context(), "open", c)
+			require.NoError(t, err)
+			require.Equal(t, "https://api.example.com/api/v1/auth/oauth/wechat/callback", options.RedirectURI)
+		})
+	}
 }
 
 // TestAuthHandlerGetCurrentUserReturnsProfileCompatibilityFields loads a
@@ -147,12 +182,10 @@ func TestAuthHandlerRevokeAllSessionsInvalidatesAccessTokens(t *testing.T) {
 		},
 	}
 	refreshTokenCache := &userHandlerRefreshTokenCacheStub{}
-	cfg := &config.Config{
-		JWT: config.JWTConfig{
-			Secret:     "test-secret",
-			ExpireHour: 1,
-		},
-	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWT: config.JWTConfig{
+		Secret:                "test-secret",
+		AccessTokenTTLMinutes: 60,
+	}}}
 	authService := newUserBindingAuth(repo, refreshTokenCache, cfg, nil, nil)
 	handler := identityhttp.NewSessionHandler(authService, nil, nil, nil, nil, nil, identityhttp.SessionHTTPOptions{})
 
@@ -200,7 +233,7 @@ func newUserProfileCore(t *testing.T, users identitycore.UserRepository) *identi
 // exercise profile/session paths backed by the supplied users, refresh cache,
 // settings, and email capabilities.
 func newUserBindingAuth(users identitycore.UserRepository, refresh identitycore.RefreshTokenCache, cfg *config.Config, settings identitycore.AuthSettings, email identitycore.AuthEmail) *identitycore.AuthService {
-	options := &identitycore.AuthOptions{JWT: identitycore.SessionOptions{Secret: cfg.JWT.Secret, ExpireHour: cfg.JWT.ExpireHour}}
+	options := &identitycore.AuthOptions{JWT: identitycore.SessionOptions{Secret: cfg.Auth.JWT.Secret, AccessTokenExpireMinutes: cfg.Auth.JWT.AccessTokenTTLMinutes}}
 	deps := &identitycore.AuthDependencies{Users: users, RefreshTokens: refresh, Options: options, Settings: settings, Email: email}
 	state := identitypostgres.NewAuthState(nil, deps)
 	core := identitycore.NewAuthService(deps, &identitypostgres.AuthRepository{State: state})
@@ -940,12 +973,10 @@ func TestUserHandlerBindEmailIdentityReturnsProfileResponse(t *testing.T) {
 			ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
 		},
 	}
-	cfg := &config.Config{
-		JWT: config.JWTConfig{
-			Secret:     "test-secret",
-			ExpireHour: 1,
-		},
-	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWT: config.JWTConfig{
+		Secret:                "test-secret",
+		AccessTokenTTLMinutes: 60,
+	}}}
 	emailService := identitycore.NewEmailChallenges(emailCache, nil)
 	authService := newUserBindingAuth(repo, nil, cfg, nil, emailService)
 	handler := identityhttp.NewUserHandler(newUserProfileCore(t, repo), authService, nil, nil)
@@ -1061,12 +1092,10 @@ func TestUserHandlerUnbindIdentityRevokesAllUserSessionsWhenAuthServiceConfigure
 		},
 	}
 	refreshTokenCache := &userHandlerRefreshTokenCacheStub{}
-	cfg := &config.Config{
-		JWT: config.JWTConfig{
-			Secret:     "test-secret",
-			ExpireHour: 1,
-		},
-	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWT: config.JWTConfig{
+		Secret:                "test-secret",
+		AccessTokenTTLMinutes: 60,
+	}}}
 	authService := newUserBindingAuth(repo, refreshTokenCache, cfg, nil, nil)
 	handler := identityhttp.NewUserHandler(newUserProfileCore(t, repo), authService, nil, nil)
 
@@ -1108,12 +1137,10 @@ func TestUserHandlerUnbindIdentityDoesNotRevokeSessionsWhenNothingWasUnbound(t *
 		},
 	}
 	refreshTokenCache := &userHandlerRefreshTokenCacheStub{}
-	cfg := &config.Config{
-		JWT: config.JWTConfig{
-			Secret:     "test-secret",
-			ExpireHour: 1,
-		},
-	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWT: config.JWTConfig{
+		Secret:                "test-secret",
+		AccessTokenTTLMinutes: 60,
+	}}}
 	authService := newUserBindingAuth(repo, refreshTokenCache, cfg, nil, nil)
 	handler := identityhttp.NewUserHandler(newUserProfileCore(t, repo), authService, nil, nil)
 
@@ -1153,12 +1180,10 @@ func TestUserHandlerBindEmailIdentityRejectsWrongCurrentPasswordForBoundEmail(t 
 			ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
 		},
 	}
-	cfg := &config.Config{
-		JWT: config.JWTConfig{
-			Secret:     "test-secret",
-			ExpireHour: 1,
-		},
-	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWT: config.JWTConfig{
+		Secret:                "test-secret",
+		AccessTokenTTLMinutes: 60,
+	}}}
 	emailService := identitycore.NewEmailChallenges(emailCache, nil)
 	// Enable user_email_change_enabled to reach password validation; a disabled setting returns 403 first.
 	settingService := newUserBindingSettings(&userHandlerSettingRepoStub{values: map[string]string{

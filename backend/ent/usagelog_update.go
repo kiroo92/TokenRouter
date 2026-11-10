@@ -35,6 +35,74 @@ func (_u *UsageLogUpdate) Where(ps ...predicate.UsageLog) *UsageLogUpdate {
 	return _u
 }
 
+// SetImageFrameCount sets the "image_frame_count" field.
+func (_u *UsageLogUpdate) SetImageFrameCount(v int) *UsageLogUpdate {
+	_u.mutation.ResetImageFrameCount()
+	_u.mutation.SetImageFrameCount(v)
+	return _u
+}
+
+// SetNillableImageFrameCount sets the "image_frame_count" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableImageFrameCount(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetImageFrameCount(*v)
+	}
+	return _u
+}
+
+// AddImageFrameCount adds value to the "image_frame_count" field.
+func (_u *UsageLogUpdate) AddImageFrameCount(v int) *UsageLogUpdate {
+	_u.mutation.AddImageFrameCount(v)
+	return _u
+}
+
+// SetImageCacheReadTokens sets the "image_cache_read_tokens" field.
+func (_u *UsageLogUpdate) SetImageCacheReadTokens(v int) *UsageLogUpdate {
+	_u.mutation.ResetImageCacheReadTokens()
+	_u.mutation.SetImageCacheReadTokens(v)
+	return _u
+}
+
+// SetNillableImageCacheReadTokens sets the "image_cache_read_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableImageCacheReadTokens(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetImageCacheReadTokens(*v)
+	}
+	return _u
+}
+
+// AddImageCacheReadTokens adds value to the "image_cache_read_tokens" field.
+func (_u *UsageLogUpdate) AddImageCacheReadTokens(v int) *UsageLogUpdate {
+	_u.mutation.AddImageCacheReadTokens(v)
+	return _u
+}
+
+// SetRequestSource sets the "request_source" field.
+func (_u *UsageLogUpdate) SetRequestSource(v string) *UsageLogUpdate {
+	_u.mutation.SetRequestSource(v)
+	return _u
+}
+
+// SetNillableRequestSource sets the "request_source" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableRequestSource(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetRequestSource(*v)
+	}
+	return _u
+}
+
+// SetSystemUsage sets the "system_usage" field.
+func (_u *UsageLogUpdate) SetSystemUsage(v map[string]interface{}) *UsageLogUpdate {
+	_u.mutation.SetSystemUsage(v)
+	return _u
+}
+
+// ClearSystemUsage clears the value of the "system_usage" field.
+func (_u *UsageLogUpdate) ClearSystemUsage() *UsageLogUpdate {
+	_u.mutation.ClearSystemUsage()
+	return _u
+}
+
 // SetUserID sets the "user_id" field.
 func (_u *UsageLogUpdate) SetUserID(v int64) *UsageLogUpdate {
 	_u.mutation.SetUserID(v)
@@ -46,6 +114,12 @@ func (_u *UsageLogUpdate) SetNillableUserID(v *int64) *UsageLogUpdate {
 	if v != nil {
 		_u.SetUserID(*v)
 	}
+	return _u
+}
+
+// ClearUserID clears the value of the "user_id" field.
+func (_u *UsageLogUpdate) ClearUserID() *UsageLogUpdate {
+	_u.mutation.ClearUserID()
 	return _u
 }
 
@@ -107,6 +181,12 @@ func (_u *UsageLogUpdate) SetNillableAPIKeyID(v *int64) *UsageLogUpdate {
 	if v != nil {
 		_u.SetAPIKeyID(*v)
 	}
+	return _u
+}
+
+// ClearAPIKeyID clears the value of the "api_key_id" field.
+func (_u *UsageLogUpdate) ClearAPIKeyID() *UsageLogUpdate {
+	_u.mutation.ClearAPIKeyID()
 	return _u
 }
 
@@ -1176,6 +1256,11 @@ func (_u *UsageLogUpdate) ExecX(ctx context.Context) {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *UsageLogUpdate) check() error {
+	if v, ok := _u.mutation.RequestSource(); ok {
+		if err := usagelog.RequestSourceValidator(v); err != nil {
+			return &ValidationError{Name: "request_source", err: fmt.Errorf(`ent: validator failed for field "UsageLog.request_source": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Platform(); ok {
 		if err := usagelog.PlatformValidator(v); err != nil {
 			return &ValidationError{Name: "platform", err: fmt.Errorf(`ent: validator failed for field "UsageLog.platform": %w`, err)}
@@ -1261,12 +1346,6 @@ func (_u *UsageLogUpdate) check() error {
 			return &ValidationError{Name: "video_resolution", err: fmt.Errorf(`ent: validator failed for field "UsageLog.video_resolution": %w`, err)}
 		}
 	}
-	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
-		return errors.New(`ent: clearing a required unique edge "UsageLog.user"`)
-	}
-	if _u.mutation.APIKeyCleared() && len(_u.mutation.APIKeyIDs()) > 0 {
-		return errors.New(`ent: clearing a required unique edge "UsageLog.api_key"`)
-	}
 	if _u.mutation.ProviderCleared() && len(_u.mutation.ProviderIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "UsageLog.provider"`)
 	}
@@ -1284,6 +1363,27 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 				ps[i](selector)
 			}
 		}
+	}
+	if value, ok := _u.mutation.ImageFrameCount(); ok {
+		_spec.SetField(usagelog.FieldImageFrameCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedImageFrameCount(); ok {
+		_spec.AddField(usagelog.FieldImageFrameCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ImageCacheReadTokens(); ok {
+		_spec.SetField(usagelog.FieldImageCacheReadTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedImageCacheReadTokens(); ok {
+		_spec.AddField(usagelog.FieldImageCacheReadTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.RequestSource(); ok {
+		_spec.SetField(usagelog.FieldRequestSource, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SystemUsage(); ok {
+		_spec.SetField(usagelog.FieldSystemUsage, field.TypeJSON, value)
+	}
+	if _u.mutation.SystemUsageCleared() {
+		_spec.ClearField(usagelog.FieldSystemUsage, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.BillingUserID(); ok {
 		_spec.SetField(usagelog.FieldBillingUserID, field.TypeInt64, value)
@@ -1763,6 +1863,74 @@ type UsageLogUpdateOne struct {
 	mutation *UsageLogMutation
 }
 
+// SetImageFrameCount sets the "image_frame_count" field.
+func (_u *UsageLogUpdateOne) SetImageFrameCount(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetImageFrameCount()
+	_u.mutation.SetImageFrameCount(v)
+	return _u
+}
+
+// SetNillableImageFrameCount sets the "image_frame_count" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableImageFrameCount(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetImageFrameCount(*v)
+	}
+	return _u
+}
+
+// AddImageFrameCount adds value to the "image_frame_count" field.
+func (_u *UsageLogUpdateOne) AddImageFrameCount(v int) *UsageLogUpdateOne {
+	_u.mutation.AddImageFrameCount(v)
+	return _u
+}
+
+// SetImageCacheReadTokens sets the "image_cache_read_tokens" field.
+func (_u *UsageLogUpdateOne) SetImageCacheReadTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetImageCacheReadTokens()
+	_u.mutation.SetImageCacheReadTokens(v)
+	return _u
+}
+
+// SetNillableImageCacheReadTokens sets the "image_cache_read_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableImageCacheReadTokens(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetImageCacheReadTokens(*v)
+	}
+	return _u
+}
+
+// AddImageCacheReadTokens adds value to the "image_cache_read_tokens" field.
+func (_u *UsageLogUpdateOne) AddImageCacheReadTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.AddImageCacheReadTokens(v)
+	return _u
+}
+
+// SetRequestSource sets the "request_source" field.
+func (_u *UsageLogUpdateOne) SetRequestSource(v string) *UsageLogUpdateOne {
+	_u.mutation.SetRequestSource(v)
+	return _u
+}
+
+// SetNillableRequestSource sets the "request_source" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableRequestSource(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetRequestSource(*v)
+	}
+	return _u
+}
+
+// SetSystemUsage sets the "system_usage" field.
+func (_u *UsageLogUpdateOne) SetSystemUsage(v map[string]interface{}) *UsageLogUpdateOne {
+	_u.mutation.SetSystemUsage(v)
+	return _u
+}
+
+// ClearSystemUsage clears the value of the "system_usage" field.
+func (_u *UsageLogUpdateOne) ClearSystemUsage() *UsageLogUpdateOne {
+	_u.mutation.ClearSystemUsage()
+	return _u
+}
+
 // SetUserID sets the "user_id" field.
 func (_u *UsageLogUpdateOne) SetUserID(v int64) *UsageLogUpdateOne {
 	_u.mutation.SetUserID(v)
@@ -1774,6 +1942,12 @@ func (_u *UsageLogUpdateOne) SetNillableUserID(v *int64) *UsageLogUpdateOne {
 	if v != nil {
 		_u.SetUserID(*v)
 	}
+	return _u
+}
+
+// ClearUserID clears the value of the "user_id" field.
+func (_u *UsageLogUpdateOne) ClearUserID() *UsageLogUpdateOne {
+	_u.mutation.ClearUserID()
 	return _u
 }
 
@@ -1835,6 +2009,12 @@ func (_u *UsageLogUpdateOne) SetNillableAPIKeyID(v *int64) *UsageLogUpdateOne {
 	if v != nil {
 		_u.SetAPIKeyID(*v)
 	}
+	return _u
+}
+
+// ClearAPIKeyID clears the value of the "api_key_id" field.
+func (_u *UsageLogUpdateOne) ClearAPIKeyID() *UsageLogUpdateOne {
+	_u.mutation.ClearAPIKeyID()
 	return _u
 }
 
@@ -2917,6 +3097,11 @@ func (_u *UsageLogUpdateOne) ExecX(ctx context.Context) {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *UsageLogUpdateOne) check() error {
+	if v, ok := _u.mutation.RequestSource(); ok {
+		if err := usagelog.RequestSourceValidator(v); err != nil {
+			return &ValidationError{Name: "request_source", err: fmt.Errorf(`ent: validator failed for field "UsageLog.request_source": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Platform(); ok {
 		if err := usagelog.PlatformValidator(v); err != nil {
 			return &ValidationError{Name: "platform", err: fmt.Errorf(`ent: validator failed for field "UsageLog.platform": %w`, err)}
@@ -3002,12 +3187,6 @@ func (_u *UsageLogUpdateOne) check() error {
 			return &ValidationError{Name: "video_resolution", err: fmt.Errorf(`ent: validator failed for field "UsageLog.video_resolution": %w`, err)}
 		}
 	}
-	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
-		return errors.New(`ent: clearing a required unique edge "UsageLog.user"`)
-	}
-	if _u.mutation.APIKeyCleared() && len(_u.mutation.APIKeyIDs()) > 0 {
-		return errors.New(`ent: clearing a required unique edge "UsageLog.api_key"`)
-	}
 	if _u.mutation.ProviderCleared() && len(_u.mutation.ProviderIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "UsageLog.provider"`)
 	}
@@ -3042,6 +3221,27 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 				ps[i](selector)
 			}
 		}
+	}
+	if value, ok := _u.mutation.ImageFrameCount(); ok {
+		_spec.SetField(usagelog.FieldImageFrameCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedImageFrameCount(); ok {
+		_spec.AddField(usagelog.FieldImageFrameCount, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ImageCacheReadTokens(); ok {
+		_spec.SetField(usagelog.FieldImageCacheReadTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedImageCacheReadTokens(); ok {
+		_spec.AddField(usagelog.FieldImageCacheReadTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.RequestSource(); ok {
+		_spec.SetField(usagelog.FieldRequestSource, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SystemUsage(); ok {
+		_spec.SetField(usagelog.FieldSystemUsage, field.TypeJSON, value)
+	}
+	if _u.mutation.SystemUsageCleared() {
+		_spec.ClearField(usagelog.FieldSystemUsage, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.BillingUserID(); ok {
 		_spec.SetField(usagelog.FieldBillingUserID, field.TypeInt64, value)

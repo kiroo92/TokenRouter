@@ -120,10 +120,11 @@ func PsSnapshotIntValue(value any) int {
 // these comparisons for legacy input. An unrecognized provider key also
 // selects no comparison branch.
 //
-// A recorded expected value requires a reported value and compares
-// trimmed text case-insensitively. The checked fields depend on the
-// provider, and supplied WeChat or Airwallex success-status metadata
-// is checked when present. Callers separately establish notification
+// Recorded attributes generally compare trimmed text case-insensitively.
+// EPUSDT requires an exact nonempty PID and compares fiat currency
+// case-insensitively. The checked fields depend on the provider, and supplied
+// WeChat or Airwallex success-status metadata is checked when present.
+// Callers separately establish notification
 // signatures, provider binding, and paid-amount validity before applying
 // any payment transition.
 func ValidateProviderSnapshotMetadata(order *Order, providerKey string, metadata map[string]string) error {

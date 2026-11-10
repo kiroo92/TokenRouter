@@ -33,6 +33,9 @@ WORKDIR /app/frontend
 # Node 版本需要与 .node-version 一致，镜像覆盖值同样检查；pnpm 版本取 package.json 的 packageManager。
 COPY .node-version /app/
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+# The linked SDK supplies shared source contracts and runtime values to the host build.
+COPY plugin-sdk/web/package.json /app/plugin-sdk/web/
+COPY plugin-sdk/web/src/ /app/plugin-sdk/web/src/
 RUN test "$(node -p 'process.versions.node')" = "$(cat /app/.node-version)" && \
     npm install --global "$(node -p 'require("./package.json").packageManager')"
 
@@ -74,6 +77,8 @@ WORKDIR /app/backend
 
 # Copy go mod files first (better caching)
 COPY backend/go.mod backend/go.sum ./
+# The backend resolves the MIT SDK through a local module replacement.
+COPY plugin-sdk/go /app/plugin-sdk/go
 # 跨构建保留模块缓存，重试临时下载故障时无需重新获取全部依赖。
 RUN --mount=type=cache,id=tokenrouter-gomod,target=/go/pkg/mod \
     go mod download

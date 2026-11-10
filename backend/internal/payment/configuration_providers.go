@@ -235,6 +235,8 @@ func (s *ConfigService) ConfigCountPendingOrders(ctx context.Context, providerIn
 // CreateProviderInstance validates an administrator draft and persists its
 // instance fields with plaintext JSON configuration. Exact provider key and
 // nonblank name are required; disabled drafts skip provider construction.
+// EPUSDT requires its cryptocurrency method, selects hosted popup checkout,
+// and rejects requests enabling automatic or buyer-initiated refunds.
 //
 // EasyPay name preparation mutates the supplied config map before custom
 // mapping validation. Enabled requests construct an adapter, which can defer
@@ -426,8 +428,9 @@ func ConfigEasyPayCustomMethodTypeConflictsWithBuiltin(methodType string) bool {
 
 // UpdateProviderInstance applies supplied fields after current-instance,
 // merged-config and in-progress observations. Omitted pointers/maps/slices
-// retain stored fields, while a supplied empty collection participates in its
-// corresponding update rules.
+// generally retain stored fields, while a supplied empty collection participates
+// in its corresponding update rules. EPUSDT always selects hosted popup mode
+// and rejects requests enabling automatic or buyer-initiated refunds.
 //
 // One successful in-progress count is memoized for protected credential
 // changes, disabling and support removal checks. Config merging rereads the

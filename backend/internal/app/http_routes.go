@@ -32,7 +32,7 @@ import (
 // security middleware. Panel routes share authentication, backend-mode policy,
 // limits, and audit instances assembled once by the application. Gateway
 // registration uses the engine directly for protocol paths, while
-// authentication, user, administrator, payment, and page registrars receive the
+// authentication, user, administrator, plugin, payment, and page registrars receive the
 // /api/v1 group.
 
 // httpRouteSecurity carries the assembled guards and limiters used by route
@@ -60,6 +60,8 @@ type (
 	adminRouteMount func(*gin.RouterGroup, httpRouteSecurity, gin.HandlerFunc)
 	// gatewayRouteMount registers protocol endpoints directly on the Gin engine.
 	gatewayRouteMount func(*gin.Engine)
+	// pluginRouteMount registers plugin contributions with shared panel security middleware.
+	pluginRouteMount func(*gin.RouterGroup, httpRouteSecurity)
 	// paymentRouteMount registers payment routes under the supplied panel group.
 	paymentRouteMount func(*gin.RouterGroup, httpRouteSecurity)
 )
@@ -68,7 +70,7 @@ type (
 // callback. It mounts panel families under /api/v1, passes the engine to
 // gateway registration, and retains idempotency dependencies as Wire
 // construction requirements.
-func provideHTTPRouteMount(auth authRouteMount, user userRouteMount, admin adminRouteMount, gateway gatewayRouteMount, payment paymentRouteMount,
+func provideHTTPRouteMount(auth authRouteMount, user userRouteMount, admin adminRouteMount, gateway gatewayRouteMount, payment paymentRouteMount, plugins pluginRouteMount,
 	_ *idempotency.IdempotencyCoordinator, _ *idempotency.IdempotencyCleanupService,
 ) httpRouteMount {
 	return func(r *gin.Engine, security httpRouteSecurity, catalog gin.HandlerFunc, pages func(*gin.RouterGroup)) {
@@ -76,6 +78,7 @@ func provideHTTPRouteMount(auth authRouteMount, user userRouteMount, admin admin
 		auth(v1, security)
 		user(v1, security)
 		admin(v1, security, catalog)
+		plugins(v1, security)
 		gateway(r)
 		payment(v1, security)
 		pages(v1)
@@ -152,6 +155,7 @@ func provideUserRouteMount(
 	eRemotePool *poolhttp.RemoteAccountPoolHandler,
 	eIntelligence *intelligencehttp.IntelligenceHandler,
 	eTickets *tickethttp.TicketHandler,
+	eModelMarketplace *routinghttp.MarketplaceHandler,
 	eUserPromotion *promotionhttp.UserHandler,
 	eSubscription *billinghttp.SubscriptionHandler,
 	eAnnouncement *sitehttp.AnnouncementHandler,
@@ -175,6 +179,7 @@ func provideUserRouteMount(
 		identityhttp.RegisterUserRoutes(authenticated, eUser, eTotp, ePasskey)
 		promotionhttp.RegisterUserRoutes(authenticated, eUserPromotion)
 		apikeyhttp.RegisterUserRoutes(authenticated, eAPIKey)
+		routinghttp.RegisterUserMarketplaceRoutes(authenticated, eModelMarketplace)
 		teamhttp.RegisterUserRoutes(authenticated, eTeam, security.StepUp)
 		usagehttp.RegisterUserRoutes(authenticated, eUsage, security.Panel.Heavy())
 		creativehttp.RegisterUserRoutes(authenticated, eCreative, security.Panel.Heavy())

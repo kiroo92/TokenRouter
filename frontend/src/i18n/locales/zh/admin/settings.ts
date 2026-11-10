@@ -183,6 +183,21 @@ export default {
         enabled: '显示订阅入口',
         hint: '关闭后隐藏用户端的订阅菜单、购买标签和续费按钮，余额充值与已有订阅照常使用。',
       },
+      bstats: {
+        title: 'bStats',
+        description:
+          '将基础运行信息发送至 bStats，帮助了解 TokenRouter 的安装与版本分布，为后续改进提供参考。默认开启，可随时关闭。',
+        enabled: '启用 bStats',
+        dataHint:
+          '上报随机实例标识、操作系统及版本、架构、CPU 核数，以及 TokenRouter 和 Go 版本。bStats 根据上报连接推导国家分布，不上报账户、API Key、提示词、请求、用量或支付数据。',
+        viewStatistics: '查看公开统计',
+        logErrors: '记录上报错误',
+        logErrorsHint: '将上报失败信息写入服务端日志，默认关闭。',
+        logSentData: '记录上报内容',
+        logSentDataHint: '将上报 JSON 写入服务端日志，其中包含持久保存的实例 UUID，默认关闭。',
+        logResponse: '记录 bStats 响应',
+        logResponseHint: '将 bStats 成功响应的内容写入服务端日志，默认关闭。',
+      },
       team: {
         title: '团队功能',
         description: '控制用户团队页和管理员团队管理页是否开放。',
@@ -286,7 +301,7 @@ export default {
       totp: '双因素认证 (2FA)',
       totpHint: '允许用户使用 Google Authenticator 等应用进行二次验证',
       totpKeyNotConfigured:
-        '请先在环境变量中配置 TOTP_ENCRYPTION_KEY。使用命令 openssl rand -hex 32 生成密钥。',
+        '请先在 config.yaml 中配置 security.secret_encryption_key。使用命令 openssl rand -hex 32 生成密钥。',
     },
     security: {
       stepUp: '敏感操作二次验证 (step-up 2FA)',
@@ -395,7 +410,7 @@ export default {
       description: '控制 API Key 白/黑名单、操作审计日志与会话 IP/UA 绑定使用哪个客户端 IP 判断',
       trustForwardedIp: '信任反代传递的客户端 IP',
       trustForwardedIpHint:
-        '为保证升级兼容默认开启。开启后 CF-Connecting-IP、X-Real-IP 或 X-Forwarded-For 会直接接管客户端 IP 解析并覆盖 server.trusted_proxies；关闭后严格使用 server.trusted_proxies 配置的 Gin 可信代理链。仅在源站无法被直接访问时开启接管模式。切换会改变现有会话的 IP 指纹。',
+        '为保证升级兼容默认开启。开启后 CF-Connecting-IP、X-Real-IP 或 X-Forwarded-For 会直接接管客户端 IP 解析并覆盖 server.client_ip.trusted_proxies；关闭后严格使用 server.client_ip.trusted_proxies 配置的 Gin 可信代理链。仅在源站无法被直接访问时开启接管模式。切换会改变现有会话的 IP 指纹。',
       forwardedClientIpHeaders: '自定义客户端 IP 请求头',
       forwardedClientIpHeadersHint: '添加 CDN 或反代请求头名称，解析时优先于内置请求头。',
       forwardedClientIpHeadersPlaceholder: 'X-Client-IP',
@@ -682,7 +697,7 @@ export default {
       ttftModeFirstEvent: '首包（首个上游事件）',
       ttftModeFirstOutput: '首字（首个有效内容）',
       ttftModeHint:
-        '适用于所有文本流平台和协议，从本次上游请求发起计时。设置影响新请求，TPS 始终按有效内容区间计算。',
+        '适用于所有文本流平台和协议，从本次上游请求发起计时。设置影响新请求。TPS 不受此设置影响，按本次上游调用开始至最后有效内容的时间计算平均输出速度。',
       fingerprintUnification: '指纹统一化',
       fingerprintUnificationHint:
         '统一共享同一 OAuth 提供商的用户的 X-Stainless-* 请求头。关闭后透传客户端原始请求头。',
@@ -779,6 +794,14 @@ export default {
       testNoResults: '无搜索结果',
     },
     site: {
+      socialSharing: '社交分享',
+      socialSharingHint: '配置 Twitter Card 和 Open Graph 链接预览的标题、简介和封面。',
+      shareTitleHint: '留空使用首页标题；首页标题为空时使用站点名称。',
+      shareDescriptionHint: '留空使用站点副标题。',
+      shareCover: '分享封面',
+      shareCoverHint:
+        '支持 PNG、JPEG、WebP，最大 2 MiB、4096 × 4096 像素。建议尺寸 1200 × 630。保存设置后生效，社交平台可能仍缓存旧预览。',
+
       title: '站点设置',
       description: '自定义站点品牌',
       backendMode: 'Backend 模式',
@@ -806,7 +829,7 @@ export default {
       siteSubtitleEnPlaceholder:
         'No need to manage multiple subscriptions. Access Claude, GPT, Gemini and more with a single API key',
       apiBaseUrl: 'API 端点地址',
-      apiBaseUrlHint: '用于"使用密钥"、"导入到 CC Switch"和回调地址建议，留空则使用当前站点地址',
+      apiBaseUrlHint: '用于"使用密钥"和"导入到 CC Switch"，留空则使用当前站点地址',
       apiBaseUrlPlaceholder: 'https://api.example.com',
       clientProviderId: '客户端服务商标识',
       clientProviderIdHint:
@@ -838,7 +861,7 @@ export default {
         descriptionPlaceholder: '如：支持 OpenAI 格式请求',
         add: '添加端点',
       },
-      contactInfo: '客服联系方式',
+      contactInfo: '联系方式',
       contactInfoPlaceholder: '例如：QQ: 123456789',
       contactInfoHint: '可添加多条号码、群链接和二维码，展示在个人资料、顶部客服入口及用户菜单。',
       docUrl: '文档链接',
@@ -963,9 +986,9 @@ export default {
       providerWxpay: '微信官方',
       providerStripe: 'Stripe',
       providerAirwallex: 'Airwallex',
-      providerEPUSDT: 'EPUSDT / GMPay',
+      providerEPUSDT: 'EPUSDT / GMPay（EPay 协议）',
       field_epusdtApiBaseHint:
-        '填写部署的 epusdt HTTPS 地址，例如 https://pay.example.com。使用 API Key 中的商户密钥。',
+        '填写 EPUSDT HTTPS 基础地址，例如 https://pay.example.com。使用 EPay submit.php 跳转协议和 MD5 签名，密钥填写商户 API Key 的 secret。',
       typeDisabled: '类型已禁用',
       enableTypesFirst: '请先在上方启用至少一种服务商',
       easypayRedirect: '跳转',

@@ -179,18 +179,21 @@ type UpdateSettingsRequest struct {
 	GoogleOAuthRedirectURL         string `json:"google_oauth_redirect_url"`          // Google registered backend callback URL
 	GoogleOAuthFrontendRedirectURL string `json:"google_oauth_frontend_redirect_url"` // Google frontend authorization completion destination
 
-	LocalizedSettings   locale.TextUpdates     `json:"localized_settings"`     // localized operational text editor updates
-	SiteTexts           sitedto.LocalizedTexts `json:"site_texts"`             // localized site text editor updates
-	DefaultLocale       string                 `json:"default_locale"`         // default user-facing language code
-	SiteName            string                 `json:"site_name"`              // source site display name
-	SiteLogo            string                 `json:"site_logo"`              // site logo reference text
-	SiteSubtitle        string                 `json:"site_subtitle"`          // source site subtitle text
-	APIBaseURL          string                 `json:"api_base_url"`           // displayed gateway API address
-	ClientProviderID    string                 `json:"client_provider_id"`     // exported client provider identifier
-	ContactInfo         string                 `json:"contact_info"`           // source administrator contact text
-	DocURL              string                 `json:"doc_url"`                // source documentation destination text
-	HomeContent         string                 `json:"home_content"`           // source custom homepage content
-	HideCcsImportButton bool                   `json:"hide_ccs_import_button"` // CCS import control visibility switch
+	LocalizedSettings locale.TextUpdates     `json:"localized_settings"` // localized operational text editor updates
+	SiteTexts         sitedto.LocalizedTexts `json:"site_texts"`         // localized site text editor updates
+	DefaultLocale     string                 `json:"default_locale"`     // default user-facing language code
+	SiteName          string                 `json:"site_name"`          // source site display name
+	SiteLogo          string                 `json:"site_logo"`          // site logo reference text
+	// SiteShareImage carries a cover data URL. Omission preserves the stored
+	// image; an explicitly empty value removes it through the site participant.
+	SiteShareImage      string `json:"site_share_image"`       // Saved cover image data URL.
+	SiteSubtitle        string `json:"site_subtitle"`          // source site subtitle text
+	APIBaseURL          string `json:"api_base_url"`           // displayed gateway API address
+	ClientProviderID    string `json:"client_provider_id"`     // exported client provider identifier
+	ContactInfo         string `json:"contact_info"`           // source administrator contact text
+	DocURL              string `json:"doc_url"`                // source documentation destination text
+	HomeContent         string `json:"home_content"`           // source custom homepage content
+	HideCcsImportButton bool   `json:"hide_ccs_import_button"` // CCS import control visibility switch
 	// SubscriptionEntryEnabled retains the stored visibility when omitted; browser
 	// consumers use it to hide subscription navigation and purchase controls.
 	SubscriptionEntryEnabled *bool `json:"subscription_entry_enabled"` // user subscription entry visibility
@@ -394,11 +397,16 @@ type UpdateSettingsRequest struct {
 	PaymentAlipayForceQRCode             *bool `json:"payment_alipay_force_qrcode"`               // mobile Alipay QR-code preference
 	PaymentAlipayMobilePrecreateDeepLink *bool `json:"payment_alipay_mobile_precreate_deep_link"` // mobile Alipay precreation link preference
 
-	RiskControlEnabled  *bool `json:"risk_control_enabled"` // risk-center and auditing runtime switch
-	TeamEnabled         *bool `json:"team_enabled"`         // team runtime availability switch
-	IntelligenceEnabled *bool `json:"intelligence_enabled"` // requested quality check availability
-
-	CreativeEnabled *bool `json:"creative_enabled"` // Creative Studio runtime access switch
+	RiskControlEnabled *bool `json:"risk_control_enabled"` // risk-center and auditing runtime switch
+	// BStats controls retain their stored values when omitted or null. Explicit
+	// false changes only that control; identity is never accepted through this DTO.
+	BStatsEnabled               *bool `json:"bstats_enabled"`                  // reporting enablement control
+	BStatsLogErrors             *bool `json:"bstats_log_errors"`               // report failure logging
+	BStatsLogSentData           *bool `json:"bstats_log_sent_data"`            // outgoing payload logging
+	BStatsLogResponseStatusText *bool `json:"bstats_log_response_status_text"` // received response logging
+	TeamEnabled                 *bool `json:"team_enabled"`                    // team runtime availability switch
+	CreativeEnabled             *bool `json:"creative_enabled"`                // Creative Studio runtime access switch
+	IntelligenceEnabled         *bool `json:"intelligence_enabled"`            // requested quality check availability
 
 	CyberSessionBlockEnabled *bool `json:"cyber_session_block_enabled"` // cyber-session blocking runtime switch
 	// CyberSessionBlockTTLSeconds retains prior lifetime when nil. A supplied

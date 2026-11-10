@@ -80,10 +80,9 @@ func (s *antigravityProbeTransport) DoWithTLS(req *http.Request, proxy string, i
 // headers and body, response closure, safe ordered SSE events, and rejection
 // after shared activity stops.
 func TestNativeAntigravityProbeAssembly(t *testing.T) {
-	t.Setenv("GATEWAY_ANTIGRAVITY_FORWARD_BASE_URL", "prod")
 	f := newDatabaseFixture(t)
 	store := providerpostgres.NewProviderStore(f.client, f.db, providerpostgres.ProviderStoreOptions{})
-	cfg := &config.Config{}
+	cfg := &config.Config{Provider: config.ProviderConfig{Antigravity: config.AntigravityProviderConfig{ForwardEndpoint: "prod"}}}
 	runtime := NewProviderHealthRuntimeForTest(store, nil, cfg, nil, nil, nil, nil, nil)
 	tokens := &provider.AntigravityTokenSource{}
 	transport := &antigravityProbeTransport{}
@@ -91,7 +90,7 @@ func TestNativeAntigravityProbeAssembly(t *testing.T) {
 	manager := lifecycle.New()
 	activity := NewGatewayActivityForTest(manager)
 	probe := NewAntigravityProbeForTest(tokens, retry, activity)
-	core := NewProviderTestsForTest(store, nil, nil, nil, probe, transport, cfg, nil, nil, nil, nil, manager, nil, nil)
+	core := NewProviderTestsForTest(store, nil, nil, nil, probe, transport, cfg, nil, nil, nil, nil, manager, nil, nil, nil)
 	require.Empty(t, transport.requests)
 
 	row, err := f.client.Provider.Create().SetName("test-antigravity-probe").SetPlatform(provider.PlatformAntigravity).SetType(provider.ProviderTypeOAuth).SetCredentials(map[string]any{

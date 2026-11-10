@@ -8,6 +8,7 @@ import (
 	billinghttp "github.com/TokenFlux/TokenRouter/internal/billing/httpapi"
 	identitydto "github.com/TokenFlux/TokenRouter/internal/identity/httpapi/dto"
 	routingdto "github.com/TokenFlux/TokenRouter/internal/routing/httpapi/dto"
+	"github.com/TokenFlux/TokenRouter/internal/usage"
 )
 
 // types.go defines user and administrator usage-response fields and
@@ -35,9 +36,9 @@ type (
 // HTTP encoding.
 type UsageLog struct {
 	ID         int64  `json:"id"`                // usage row identifier
-	UserID     int64  `json:"user_id"`           // acting user identifier
+	UserID     *int64 `json:"user_id"`           // acting user identifier
 	TeamID     *int64 `json:"team_id,omitempty"` // optional team identifier omitted when nil
-	APIKeyID   int64  `json:"api_key_id"`        // used key identifier
+	APIKeyID   *int64 `json:"api_key_id"`        // used key identifier
 	ProviderID int64  `json:"provider_id"`       // execution provider identifier
 	Platform   string `json:"platform"`          // stored execution platform
 	RequestID  string `json:"request_id"`        // local diagnostic request identifier
@@ -93,15 +94,17 @@ type UsageLog struct {
 	TPS                *float64 `json:"tps"`                  // estimated output tokens per second
 	TTFTMode           string   `json:"ttft_mode,omitempty"`  // captured request timing mode
 
-	ImageCount        int     `json:"image_count"`         // recorded generated image count
-	ImageSize         *string `json:"image_size"`          // optional image billing size tier
-	ImageInputSize    *string `json:"image_input_size"`    // optional input image size
-	ImageOutputSize   *string `json:"image_output_size"`   // optional output image size
-	ImageInputTokens  int     `json:"image_input_tokens"`  // image input token count
-	ImageInputCost    float64 `json:"image_input_cost"`    // image input cost USD
-	ImageOutputTokens int     `json:"image_output_tokens"` // image output token count
-	ImageOutputCost   float64 `json:"image_output_cost"`   // image output cost USD
-	ImageSizeSource   *string `json:"image_size_source"`   // optional size selection source
+	ImageCount           int     `json:"image_count"`                       // recorded generated image count
+	ImageFrameCount      int     `json:"image_frame_count,omitempty"`       // encoded output frame billing units
+	ImageSize            *string `json:"image_size"`                        // optional image billing size tier
+	ImageInputSize       *string `json:"image_input_size"`                  // optional input image size
+	ImageOutputSize      *string `json:"image_output_size"`                 // optional output image size
+	ImageInputTokens     int     `json:"image_input_tokens"`                // image input token count
+	ImageCacheReadTokens int     `json:"image_cache_read_tokens,omitempty"` // explicit cached image token subset
+	ImageInputCost       float64 `json:"image_input_cost"`                  // image input cost USD
+	ImageOutputTokens    int     `json:"image_output_tokens"`               // image output token count
+	ImageOutputCost      float64 `json:"image_output_cost"`                 // image output cost USD
+	ImageSizeSource      *string `json:"image_size_source"`                 // optional size selection source
 	// ImageSizeBreakdown carries image counts grouped by size tier. Usage
 	// mappers retain the source map, so callers leave it unchanged during JSON
 	// encoding.
@@ -127,7 +130,9 @@ type UsageLog struct {
 // AdminUsageLog carries usage details with administrator model, provider-cost
 // and timing observations.
 type AdminUsageLog struct {
-	UsageLog // embedded regular usage response
+	RequestSource string             `json:"request_source"`         // recorded customer or system source
+	SystemUsage   *usage.SystemUsage `json:"system_usage,omitempty"` // optional internal execution evidence
+	UsageLog                         // embedded regular usage response
 
 	// DetailedTiming is joined by the administrator handler from http.access
 	// observations. Nil leaves the timing object omitted when lookup finds no
@@ -225,6 +230,7 @@ type UsageLogTiming struct {
 // UsageCleanupFilters carries the filter fields exposed in cleanup-task HTTP
 // responses.
 type UsageCleanupFilters struct {
+	RequestSource string `json:"request_source,omitempty"` // optional source filter
 	// StartTime and EndTime represent the cleanup store's inclusive bounds. The
 	// creation handler expands an end date by a fixed twenty-four hours minus
 	// one nanosecond before persisting these instants.

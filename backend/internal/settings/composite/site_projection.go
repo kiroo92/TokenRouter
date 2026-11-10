@@ -36,6 +36,7 @@ func (s *Snapshot) SiteAdminSettings() site.AdminSettings {
 		PurchaseSubscriptionEnabled: s.PurchaseSubscriptionEnabled,
 		PurchaseSubscriptionURL:     s.PurchaseSubscriptionURL,
 		SiteLogo:                    s.SiteLogo,
+		SiteShareImage:              s.SiteShareImage,
 		SiteTexts:                   s.SiteTexts,
 		DefaultLocale:               s.DefaultLocale,
 		SiteName:                    s.SiteName,
@@ -70,6 +71,7 @@ func (s *Snapshot) ApplySiteAdminSettings(value site.AdminSettings) {
 	s.PurchaseSubscriptionEnabled = value.PurchaseSubscriptionEnabled
 	s.PurchaseSubscriptionURL = value.PurchaseSubscriptionURL
 	s.SiteLogo = value.SiteLogo
+	s.SiteShareImage = value.SiteShareImage
 	s.SiteTexts = value.SiteTexts
 	s.DefaultLocale = value.DefaultLocale
 	s.SiteName = value.SiteName
@@ -103,6 +105,7 @@ func (s *Snapshot) ApplySiteAdminReadSettings(value *site.AdminReadSettings) {
 	s.PurchaseSubscriptionEnabled = value.PurchaseSubscriptionEnabled
 	s.PurchaseSubscriptionURL = value.PurchaseSubscriptionURL
 	s.SiteLogo = value.SiteLogo
+	s.SiteShareImage = value.SiteShareImage
 	s.SiteTexts = value.SiteTexts
 	s.DefaultLocale = value.DefaultLocale
 	s.SiteName = value.SiteName

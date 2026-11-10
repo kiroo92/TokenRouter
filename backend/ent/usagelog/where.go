@@ -55,6 +55,21 @@ func IDLTE(id int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldID, id))
 }
 
+// ImageFrameCount applies equality check predicate on the "image_frame_count" field. It's identical to ImageFrameCountEQ.
+func ImageFrameCount(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldImageFrameCount, v))
+}
+
+// ImageCacheReadTokens applies equality check predicate on the "image_cache_read_tokens" field. It's identical to ImageCacheReadTokensEQ.
+func ImageCacheReadTokens(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldImageCacheReadTokens, v))
+}
+
+// RequestSource applies equality check predicate on the "request_source" field. It's identical to RequestSourceEQ.
+func RequestSource(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRequestSource, v))
+}
+
 // UserID applies equality check predicate on the "user_id" field. It's identical to UserIDEQ.
 func UserID(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldUserID, v))
@@ -310,6 +325,161 @@ func CreatedAt(v time.Time) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldCreatedAt, v))
 }
 
+// ImageFrameCountEQ applies the EQ predicate on the "image_frame_count" field.
+func ImageFrameCountEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldImageFrameCount, v))
+}
+
+// ImageFrameCountNEQ applies the NEQ predicate on the "image_frame_count" field.
+func ImageFrameCountNEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldImageFrameCount, v))
+}
+
+// ImageFrameCountIn applies the In predicate on the "image_frame_count" field.
+func ImageFrameCountIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldImageFrameCount, vs...))
+}
+
+// ImageFrameCountNotIn applies the NotIn predicate on the "image_frame_count" field.
+func ImageFrameCountNotIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldImageFrameCount, vs...))
+}
+
+// ImageFrameCountGT applies the GT predicate on the "image_frame_count" field.
+func ImageFrameCountGT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldImageFrameCount, v))
+}
+
+// ImageFrameCountGTE applies the GTE predicate on the "image_frame_count" field.
+func ImageFrameCountGTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldImageFrameCount, v))
+}
+
+// ImageFrameCountLT applies the LT predicate on the "image_frame_count" field.
+func ImageFrameCountLT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldImageFrameCount, v))
+}
+
+// ImageFrameCountLTE applies the LTE predicate on the "image_frame_count" field.
+func ImageFrameCountLTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldImageFrameCount, v))
+}
+
+// ImageCacheReadTokensEQ applies the EQ predicate on the "image_cache_read_tokens" field.
+func ImageCacheReadTokensEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldImageCacheReadTokens, v))
+}
+
+// ImageCacheReadTokensNEQ applies the NEQ predicate on the "image_cache_read_tokens" field.
+func ImageCacheReadTokensNEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldImageCacheReadTokens, v))
+}
+
+// ImageCacheReadTokensIn applies the In predicate on the "image_cache_read_tokens" field.
+func ImageCacheReadTokensIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldImageCacheReadTokens, vs...))
+}
+
+// ImageCacheReadTokensNotIn applies the NotIn predicate on the "image_cache_read_tokens" field.
+func ImageCacheReadTokensNotIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldImageCacheReadTokens, vs...))
+}
+
+// ImageCacheReadTokensGT applies the GT predicate on the "image_cache_read_tokens" field.
+func ImageCacheReadTokensGT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldImageCacheReadTokens, v))
+}
+
+// ImageCacheReadTokensGTE applies the GTE predicate on the "image_cache_read_tokens" field.
+func ImageCacheReadTokensGTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldImageCacheReadTokens, v))
+}
+
+// ImageCacheReadTokensLT applies the LT predicate on the "image_cache_read_tokens" field.
+func ImageCacheReadTokensLT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldImageCacheReadTokens, v))
+}
+
+// ImageCacheReadTokensLTE applies the LTE predicate on the "image_cache_read_tokens" field.
+func ImageCacheReadTokensLTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldImageCacheReadTokens, v))
+}
+
+// RequestSourceEQ applies the EQ predicate on the "request_source" field.
+func RequestSourceEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRequestSource, v))
+}
+
+// RequestSourceNEQ applies the NEQ predicate on the "request_source" field.
+func RequestSourceNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldRequestSource, v))
+}
+
+// RequestSourceIn applies the In predicate on the "request_source" field.
+func RequestSourceIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldRequestSource, vs...))
+}
+
+// RequestSourceNotIn applies the NotIn predicate on the "request_source" field.
+func RequestSourceNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldRequestSource, vs...))
+}
+
+// RequestSourceGT applies the GT predicate on the "request_source" field.
+func RequestSourceGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldRequestSource, v))
+}
+
+// RequestSourceGTE applies the GTE predicate on the "request_source" field.
+func RequestSourceGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldRequestSource, v))
+}
+
+// RequestSourceLT applies the LT predicate on the "request_source" field.
+func RequestSourceLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldRequestSource, v))
+}
+
+// RequestSourceLTE applies the LTE predicate on the "request_source" field.
+func RequestSourceLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldRequestSource, v))
+}
+
+// RequestSourceContains applies the Contains predicate on the "request_source" field.
+func RequestSourceContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldRequestSource, v))
+}
+
+// RequestSourceHasPrefix applies the HasPrefix predicate on the "request_source" field.
+func RequestSourceHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldRequestSource, v))
+}
+
+// RequestSourceHasSuffix applies the HasSuffix predicate on the "request_source" field.
+func RequestSourceHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldRequestSource, v))
+}
+
+// RequestSourceEqualFold applies the EqualFold predicate on the "request_source" field.
+func RequestSourceEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldRequestSource, v))
+}
+
+// RequestSourceContainsFold applies the ContainsFold predicate on the "request_source" field.
+func RequestSourceContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldRequestSource, v))
+}
+
+// SystemUsageIsNil applies the IsNil predicate on the "system_usage" field.
+func SystemUsageIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldSystemUsage))
+}
+
+// SystemUsageNotNil applies the NotNil predicate on the "system_usage" field.
+func SystemUsageNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldSystemUsage))
+}
+
 // UserIDEQ applies the EQ predicate on the "user_id" field.
 func UserIDEQ(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldUserID, v))
@@ -328,6 +498,16 @@ func UserIDIn(vs ...int64) predicate.UsageLog {
 // UserIDNotIn applies the NotIn predicate on the "user_id" field.
 func UserIDNotIn(vs ...int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotIn(FieldUserID, vs...))
+}
+
+// UserIDIsNil applies the IsNil predicate on the "user_id" field.
+func UserIDIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldUserID))
+}
+
+// UserIDNotNil applies the NotNil predicate on the "user_id" field.
+func UserIDNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldUserID))
 }
 
 // BillingUserIDEQ applies the EQ predicate on the "billing_user_id" field.
@@ -428,6 +608,16 @@ func APIKeyIDIn(vs ...int64) predicate.UsageLog {
 // APIKeyIDNotIn applies the NotIn predicate on the "api_key_id" field.
 func APIKeyIDNotIn(vs ...int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotIn(FieldAPIKeyID, vs...))
+}
+
+// APIKeyIDIsNil applies the IsNil predicate on the "api_key_id" field.
+func APIKeyIDIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldAPIKeyID))
+}
+
+// APIKeyIDNotNil applies the NotNil predicate on the "api_key_id" field.
+func APIKeyIDNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldAPIKeyID))
 }
 
 // ProviderIDEQ applies the EQ predicate on the "provider_id" field.

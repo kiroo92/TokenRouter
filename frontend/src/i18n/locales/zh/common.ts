@@ -111,6 +111,8 @@ export default {
     selectedFile: '已选：{name}',
     fileReadFailed: '读取文件失败',
     selectImageFile: '请选择图片文件',
+    unsupportedImageType: '请选择 PNG、JPEG 或 WebP 图片',
+    imageDimensionsTooLarge: '图片每边不能超过 {max} 像素',
     fileTooLargeKb: '文件过大（{size} KB），上限 {max} KB',
     copy: '复制',
     notAvailable: '不可用',
@@ -220,7 +222,7 @@ export default {
     },
     registrationFailed: '注册失败，请重试。',
     emailDomainRegistrationLimit:
-      '该邮箱域名无法注册新账户。请使用主流邮箱注册；如需使用企业邮箱，请联系客服添加域名白名单。',
+      '该邮箱域名无法注册新账户。请使用主流邮箱注册；如需使用企业邮箱，请联系我们添加域名白名单。',
     emailSuffixNotAllowed: '该邮箱域名不在允许注册范围内。',
     emailSuffixNotAllowedWithAllowed: '该邮箱域名不被允许。可用域名：{suffixes}',
     emailSuffixAllowedMore: '等 {count} 项',

@@ -13,7 +13,7 @@ import (
 // paginated results and nullable latency measurements.
 // Model rankings count saved usage rows by execution model while token-rate and
 // TTFT measurements use different sample sets. TPS requires complete streaming
-// usage and a positive interval between at least two useful content events.
+// usage and a positive interval from attempt start to last useful content.
 // Rows without an estimate still contribute to request and output-token totals.
 // TTFT uses each row's captured event mode and includes measured zero latency.
 //
@@ -62,7 +62,7 @@ func (r *Store) GetTokenStats(ctx context.Context, filter *ops.OpsTokenStatsFilt
 
 	join, where, baseArgs, next := buildUsageWhere(dashboardFilter, dashboardFilter.StartTime, dashboardFilter.EndTime, 1)
 
-	// Shared expressions apply the same content-window and captured-mode rules as
+	// Shared expressions apply the same average-speed and captured-mode rules as
 	// usage DTOs. SQL averages their eligible samples independently, rounding rate
 	// and TTFT means to two decimals and duration means to whole milliseconds.
 	baseCTE := `
@@ -80,7 +80,7 @@ WITH stats AS (
     COALESCE(SUM(ul.output_tokens), 0)::bigint AS total_output_tokens,
     COALESCE(ROUND(AVG(ul.duration_ms)::numeric, 0), 0)::bigint AS avg_duration_ms,
     COUNT(CASE WHEN ` + usageTTFTSQL("ul") + ` IS NOT NULL THEN 1 END)::bigint AS requests_with_first_token
-  FROM usage_logs ul
+  FROM (SELECT * FROM usage_logs WHERE request_source = 'user') ul
   ` + join + `
   ` + where + `
   GROUP BY ul.model

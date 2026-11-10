@@ -58,7 +58,7 @@
         >
           <router-link
             to="/subscriptions"
-            class="block w-full py-1 text-center text-xs text-primary-600 hover:underline dark:text-primary-400"
+            class="block w-full py-1 text-center text-xs text-link"
             @click="closeTooltip"
           >
             {{ t('subscriptionProgress.viewAll') }}

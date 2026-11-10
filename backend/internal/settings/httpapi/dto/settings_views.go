@@ -167,6 +167,7 @@ type SystemSettings struct {
 	DefaultLocale               string                          `json:"default_locale"`                  // default user-facing language code
 	SiteName                    string                          `json:"site_name"`                       // source site display name
 	SiteLogo                    string                          `json:"site_logo"`                       // site logo reference text
+	SiteShareImage              string                          `json:"site_share_image"`                // Saved cover image data URL.
 	SiteSubtitle                string                          `json:"site_subtitle"`                   // source site subtitle text
 	APIBaseURL                  string                          `json:"api_base_url"`                    // displayed gateway API address
 	ClientProviderID            string                          `json:"client_provider_id"`              // exported client provider identifier
@@ -193,11 +194,14 @@ type SystemSettings struct {
 	CreativeModelSettings       []creative.CreativeModelSetting `json:"creative_model_settings"`         // Creative group/model operation selections
 	CreativeWorkerCount         int                             `json:"creative_worker_count"`           // configured Creative task worker count
 
-	DefaultConcurrency  int     `json:"default_concurrency"`  // default registration concurrency allowance
-	DefaultBalance      float64 `json:"default_balance"`      // default registration balance grant amount
-	TeamEnabled         bool    `json:"team_enabled"`         // team runtime availability switch
-	IntelligenceEnabled bool    `json:"intelligence_enabled"` // model quality check availability
-
+	DefaultConcurrency                   int                                      `json:"default_concurrency"`                     // default registration concurrency allowance
+	DefaultBalance                       float64                                  `json:"default_balance"`                         // default registration balance grant amount
+	BStatsEnabled                        bool                                     `json:"bstats_enabled"`                          // reporting enablement control
+	BStatsLogErrors                      bool                                     `json:"bstats_log_errors"`                       // report failure logging
+	BStatsLogSentData                    bool                                     `json:"bstats_log_sent_data"`                    // outgoing payload logging
+	BStatsLogResponseStatusText          bool                                     `json:"bstats_log_response_status_text"`         // received response logging
+	TeamEnabled                          bool                                     `json:"team_enabled"`                            // team runtime availability switch
+	IntelligenceEnabled                  bool                                     `json:"intelligence_enabled"`                    // model quality check availability
 	CreativeEnabled                      bool                                     `json:"creative_enabled"`                        // Creative Studio runtime access switch
 	RiskControlEnabled                   bool                                     `json:"risk_control_enabled"`                    // risk-center and auditing runtime switch
 	CyberSessionBlockEnabled             bool                                     `json:"cyber_session_block_enabled"`             // cyber-session blocking runtime switch

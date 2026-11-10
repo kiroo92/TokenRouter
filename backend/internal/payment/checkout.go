@@ -40,14 +40,14 @@ import (
 // visible method before reading current configuration.
 //
 // Credited entitlement and limit principal are calculated separately.
-// Balance checkout fixes purchased API credit after its multiplier. Successful
+// Balance checkout fixes purchased API credit after the buyer's effective multiplier. Successful
 // payment later allocates cumulative and scheduled rewards using confirmed progress.
 // Subscription currency conversion precedes fees, and a selected currency
 // difference recalculates gateway charge after instance selection. Stripe
 // retains validated billing information; other providers discard it.
 // OAuth-required output returns before local creation. Otherwise the store
 // commits the draft before InvokeProvider initiates payment and persists its
-// response. Unconfirmed GMPay initiation retains its pending order and returns
+// response. Unconfirmed EPUSDT EPay initiation retains its pending order and returns
 // its identity for recovery. Other invocation errors trigger best-effort
 // FailCheckout, retaining the original error for the caller.
 func (s *Checkout) CreateOrder(ctx context.Context, req CreateOrderRequest) (*CreateOrderResponse, error) {
@@ -89,13 +89,16 @@ func (s *Checkout) CreateOrder(ctx context.Context, req CreateOrderRequest) (*Cr
 		orderAmount = plan.Price
 		limitAmount = plan.Price
 	} else if req.OrderType == OrderTypeBalance {
-		// Fix the purchased API credit before external payment begins. Confirmation
-		// uses this saved base when it allocates cumulative rewards and payment-time gifts.
-		base := CalculateCreditedBalance(req.Amount, cfg.BalanceRechargeMultiplier)
-		if math.IsNaN(base) || math.IsInf(base, 0) || base <= 0 {
-			return nil, infraerrors.BadRequest("INVALID_RECHARGE_AMOUNT", "credited recharge amount must be a finite positive number")
+		rates, err := ResolveBalanceRechargeRates(cfg.BalanceRechargeMultiplier, user.BalanceRechargeMultiplier)
+		if err != nil {
+			return nil, err
 		}
-		orderAmount = base
+		orderAmount = CalculateCreditedBalance(req.Amount, rates.Effective)
+		// Validate the rounded entitlement before creating an external payment;
+		// zero or oversized credits cannot be delivered by the redemption wallet.
+		if !IsValidCreditedBalance(orderAmount) {
+			return nil, infraerrors.BadRequest("INVALID_CREDITED_AMOUNT", "credited balance must be at least 0.01 and less than 1000000000000")
+		}
 	}
 	methodFee := cfg.EffectiveMethodFee(req.PaymentType)
 	methodCurrency := DefaultPaymentCurrency
@@ -165,7 +168,7 @@ func (s *Checkout) CreateOrder(ctx context.Context, req CreateOrderRequest) (*Cr
 	if err != nil {
 		appErr := new(infraerrors.ApplicationError)
 		if errors.As(err, &appErr) && appErr.Reason == CodePaymentCreateUnconfirmed {
-			// GMPay may have committed a checkout before its response was lost. Keep
+			// EPUSDT EPay may have committed a checkout before its response was lost. Keep
 			// this merchant number pending so a later signed callback can complete it.
 			return nil, appErr.WithMetadata(map[string]string{
 				"order_id": strconv.FormatInt(order.ID, 10), "out_trade_no": order.OutTradeNo,
@@ -184,12 +187,28 @@ func (s *Checkout) CreateOrder(ctx context.Context, req CreateOrderRequest) (*Cr
 	return resp, nil
 }
 
-// ValidateOrderInput checks balance enablement or delegates subscription
-// sale-plan lookup using nonnil configuration. Other order types follow the
-// finite positive amount and inclusive configured min/max checks; it returns
-// nil plan for those amount-based purchases and does not validate a closed
-// order-type enum here.
+// GetBalanceRechargeRates reads the authenticated buyer's current recharge
+// terms using the caller's global configuration observation. Buyer lookup and
+// invalid override errors abort the preview instead of displaying inherited terms.
+func (s *Checkout) GetBalanceRechargeRates(ctx context.Context, userID int64, global float64) (BalanceRechargeRates, error) {
+	user, err := s.runtime.User(ctx, userID)
+	if err != nil {
+		return BalanceRechargeRates{}, fmt.Errorf("get user: %w", err)
+	}
+	if user.Status != EntityStatusActive {
+		return BalanceRechargeRates{}, infraerrors.Forbidden("USER_INACTIVE", "user account is disabled")
+	}
+	return ResolveBalanceRechargeRates(global, user.BalanceRechargeMultiplier)
+}
+
+// ValidateOrderInput rejects unsupported order types before selecting balance
+// or subscription rules. CreateOrder normalizes omitted types to balance;
+// balance purchases require finite positive principal within configured limits,
+// while subscriptions delegate sale-plan lookup using nonnil configuration.
 func (s *Checkout) ValidateOrderInput(ctx context.Context, req CreateOrderRequest, cfg *PaymentConfig) (*SubscriptionPlan, error) {
+	if req.OrderType != OrderTypeBalance && req.OrderType != OrderTypeSubscription {
+		return nil, infraerrors.BadRequest("INVALID_CHECKOUT_ORDER_TYPE", "order_type must be balance or subscription")
+	}
 	if req.OrderType == OrderTypeBalance && cfg.BalanceDisabled {
 		return nil, infraerrors.Forbidden("BALANCE_PAYMENT_DISABLED", "balance recharge has been disabled")
 	}
@@ -238,8 +257,9 @@ func (s *Checkout) CreateOrderInTx(ctx context.Context, req CreateOrderRequest, 
 // merchant/currency values are added to a newly allocated map.
 //
 // Official WeChat app identity follows the payer/OpenID mode, Alipay stores
-// appId, EasyPay/GMPay store pid, and Airwallex stores accountId. Currency for
-// GMPay, Stripe and Airwallex comes from selected configuration; WeChat records CNY. Secret
+// appId, EasyPay/EPUSDT store pid, and Airwallex stores accountId. Currency for
+// EPUSDT, Stripe and Airwallex comes from selected configuration; WeChat records
+// CNY. Secret
 // credentials remain outside this snapshot and are read from current instance
 // configuration during provider construction. A map containing only
 // schema_version is discarded as no usable binding data.

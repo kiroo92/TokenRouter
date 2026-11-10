@@ -27,6 +27,7 @@ export function buildGeneralSettingsPayload(
     | 'site_texts'
     | 'default_locale'
     | 'site_logo'
+    | 'site_share_image'
     | 'api_base_url'
     | 'client_provider_id'
     | 'backend_mode_enabled'
@@ -59,6 +60,7 @@ export function buildGeneralSettingsPayload(
   | 'site_texts'
   | 'default_locale'
   | 'site_logo'
+  | 'site_share_image'
   | 'api_base_url'
   | 'client_provider_id'
   | 'backend_mode_enabled'
@@ -98,6 +100,7 @@ export function buildGeneralSettingsPayload(
     default_locale: form.default_locale,
 
     site_logo: form.site_logo,
+    site_share_image: form.site_share_image,
 
     api_base_url: form.api_base_url,
 

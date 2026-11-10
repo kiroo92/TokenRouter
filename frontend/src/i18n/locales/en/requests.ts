@@ -4,7 +4,7 @@
 // evidence for a retained request identifier.
 
 export default {
-  title: 'Request lookup',
+  title: 'Request Lookup', // Sidebar and page title.
   description: 'Find a request by its ID and inspect its execution.',
   id: 'Request ID',
   searchPlaceholder: 'Request ID',
@@ -26,6 +26,7 @@ export default {
   startedAt: 'Started at',
   duration: 'Duration',
   totalDuration: 'Total',
+  requestSize: 'Request size',
   statusCode: 'Status',
   model: 'Model',
   platform: 'Platform',

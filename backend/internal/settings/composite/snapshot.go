@@ -190,6 +190,7 @@ type Snapshot struct {
 	DefaultLocale               string                          `json:"default_locale"`     // default user-facing language code
 	SiteName                    string                          // source site display name
 	SiteLogo                    string                          // site logo reference text
+	SiteShareImage              string                          `json:"site_share_image"` // Saved cover image data URL.
 	SiteSubtitle                string                          // source site subtitle text
 	APIBaseURL                  string                          // displayed gateway API address
 	ClientProviderID            string                          // exported client provider identifier
@@ -216,9 +217,13 @@ type Snapshot struct {
 	CreativeModelSettings       []creative.CreativeModelSetting // Creative group/model operation selections
 	CreativeWorkerCount         int                             // configured Creative task worker count
 
-	DefaultConcurrency int     // default registration concurrency allowance
-	DefaultBalance     float64 // default registration balance grant amount
-	TeamEnabled        bool    // team runtime availability switch
+	DefaultConcurrency          int     // default registration concurrency allowance
+	DefaultBalance              float64 // default registration balance grant amount
+	BStatsEnabled               bool    // reporting enablement control
+	BStatsLogErrors             bool    // report failure logging
+	BStatsLogSentData           bool    // outgoing payload logging
+	BStatsLogResponseStatusText bool    // received response logging
+	TeamEnabled                 bool    // team runtime availability switch
 	// IntelligenceEnabled requires the stored switch to equal true. Missing or
 	// invalid values leave paid submissions and user result access disabled.
 	IntelligenceEnabled bool // model quality check availability

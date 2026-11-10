@@ -1,10 +1,11 @@
 import { i18n } from '@/i18n'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import type { CustomMenuItem } from '@/api/settings.types'
+import type { PluginUI } from '@/api/plugins.types'
 
 // title.ts resolves route display keys and browser document titles from route
-// metadata, configured menu names, and subscription entry visibility. The shared
-// layout and browser title callers use the same purchase-page wording when the
+// metadata, configured menu names, accepted plugin pages, and subscription entry
+// visibility. The shared layout and browser title callers use the same wording when the
 // site exposes balance top-ups with subscription navigation hidden.
 //
 // Title callers run during navigation, when public settings change, and after a
@@ -57,17 +58,26 @@ export function resolveRouteDisplayKeys(
 }
 
 // resolveRouteDocumentTitle builds the browser title from a route and its visible
-// menu settings. A matching custom-page menu label takes precedence over translated
-// route metadata, so visitors see their configured page name. For the purchase
-// route, subscriptionEntryEnabled selects the same translation key used by the
+// menu settings. Plugin pages select the title for their matching audience and path;
+// a matching custom-page menu label takes precedence over translated route metadata.
+// For the purchase route, subscriptionEntryEnabled selects the same key used by the
 // content heading. The resulting label and normalized site name use
 // resolveDocumentTitle's formatting and translation handling.
 export function resolveRouteDocumentTitle(
   route: Pick<RouteLocationNormalizedLoaded, 'name' | 'params' | 'meta'>,
   siteName: string | undefined,
   customMenuItems: CustomMenuItem[] = [],
+  plugins: readonly PluginUI[] = [],
   subscriptionEntryEnabled = true,
 ): string {
+  if (route.name === 'PluginPage' || route.name === 'AdminPluginPage') {
+    const plugin = plugins.find((entry) => entry.id === route.params.pluginId)
+    const audience = route.name === 'AdminPluginPage' ? 'admin' : 'user'
+    const subpath = route.params.subpath
+    const path = Array.isArray(subpath) ? subpath.join('/') : subpath || ''
+    const page = plugin?.pages.find((entry) => entry.audience === audience && entry.path === path)
+    if (page) return resolveDocumentTitle(page.title, siteName)
+  }
   const id = typeof route.params.id === 'string' ? route.params.id : ''
   const menuItem =
     route.name === 'CustomPage' && id ? customMenuItems.find((item) => item.id === id) : undefined

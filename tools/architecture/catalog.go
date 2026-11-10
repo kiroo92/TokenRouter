@@ -7,13 +7,14 @@ package architecture
 
 // pureStandard permits in-memory parsing, encoding, Unicode validation, and caller-owned
 // streams for pure packages. File and network acquisition require narrower permissions.
-const pureStandard = `bufio bytes context crypto/rand crypto/sha256 encoding/base64 encoding/hex encoding/json errors fmt
+const pureStandard = `bufio bytes context crypto/rand crypto/sha256 encoding/base64 encoding/binary encoding/hex encoding/json errors fmt
 golang.org/x/mod/semver golang.org/x/net/http/httpguts golang.org/x/sync/singleflight io iter maps
 math net/textproto net/url reflect regexp slices sort strconv strings sync testing time unicode unicode/utf8
 unsafe`
 
 var (
-	// 依赖表仅保存业务协作和技术库选择；目录角色与通用约束由 policy.go 统一解释。
+	// The dependency tables list supported module collaboration and library choices.
+	// Directory roles and common restrictions remain defined by policy.go.
 
 	roleLibraries = map[string]dependencySet{
 		"assembly": {Production: `entgo.io/ent/dialect entgo.io/ent/dialect/sql github.com/gin-gonic/gin github.com/google/uuid
@@ -29,7 +30,7 @@ github.com/golang-jwt/jwt/v5 github.com/google/uuid github.com/patrickmn/go-cach
 github.com/pquerna/otp github.com/pquerna/otp/totp github.com/robfig/cron/v3
 github.com/shopspring/decimal github.com/tidwall/gjson github.com/tidwall/sjson
 github.com/tiktoken-go/tokenizer go.uber.org/zap golang.org/x/crypto/bcrypt golang.org/x/image/draw
-golang.org/x/image/webp golang.org/x/net/http/httpguts golang.org/x/net/publicsuffix
+golang.org/x/image/webp golang.org/x/mod/semver golang.org/x/net/http/httpguts golang.org/x/net/publicsuffix
 golang.org/x/sync/errgroup golang.org/x/sync/singleflight`, Tests: `github.com/DATA-DOG/go-sqlmock github.com/redis/go-redis/v9 github.com/stretchr/testify/assert
 github.com/stretchr/testify/require github.com/testcontainers/testcontainers-go/modules/redis`},
 		"fixture": {Production: `entgo.io/ent/dialect entgo.io/ent/dialect/sql github.com/alicebob/miniredis/v2
@@ -58,6 +59,10 @@ github.com/stretchr/testify/require github.com/stretchr/testify/suite
 github.com/testcontainers/testcontainers-go/modules/postgres
 github.com/testcontainers/testcontainers-go/modules/redis modernc.org/sqlite`},
 		"provider": {Production: `github.com/chromedp/chromedp github.com/chromedp/cdproto/cdp github.com/chromedp/cdproto/fetch
+gopkg.in/yaml.v3
+github.com/hashicorp/go-plugin github.com/hashicorp/go-plugin/runner github.com/hashicorp/go-hclog
+google.golang.org/grpc/... google.golang.org/protobuf/... google.golang.org/genproto/googleapis/rpc/...
+github.com/shirou/gopsutil/v4/process golang.org/x/time/rate
 golang.org/x/crypto/bcrypt github.com/ory/fosite github.com/ory/fosite/compose
 github.com/alibabacloud-go/captcha-20230305/client
 github.com/alibabacloud-go/darabonba-openapi/v2/utils github.com/alibabacloud-go/tea/dara
@@ -68,7 +73,7 @@ github.com/aws/aws-sdk-go-v2/service/s3 github.com/coder/websocket
 github.com/go-webauthn/webauthn/protocol github.com/go-webauthn/webauthn/webauthn
 github.com/golang-jwt/jwt/v5 github.com/google/uuid github.com/imroc/req/v3
 github.com/redis/go-redis/v9 github.com/robfig/cron/v3 github.com/shirou/gopsutil/v4/cpu
-github.com/shirou/gopsutil/v4/disk github.com/shirou/gopsutil/v4/mem github.com/shopspring/decimal
+github.com/shirou/gopsutil/v4/host github.com/shirou/gopsutil/v4/disk github.com/shirou/gopsutil/v4/mem github.com/shopspring/decimal
 github.com/smartwalle/alipay/v3 github.com/spf13/viper github.com/stripe/stripe-go/v85
 github.com/stripe/stripe-go/v85/webhook
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/captcha/v20190722
@@ -110,9 +115,11 @@ github.com/stretchr/testify/suite`},
 		"internal/intelligence": {Production: `internal/server/adminapi internal/intelligence/... internal/apikey internal/routing internal/identity internal/identity/httpapi/authctx internal/settings internal/egress/urlpolicy internal/pkg/apperror internal/server/httpx`, Tests: `internal/testutil/postgrescontainer migrations`},
 		"internal/ticket":       {Production: `internal/server/adminapi internal/ticket/... internal/pkg/apperror internal/identity/httpapi/authctx internal/server/httpx`, Tests: `internal/testutil/postgrescontainer migrations`},
 		"internal/remotepool":   {Production: `internal/server/adminapi internal/pkg/ internal/remotepool/... internal/routing internal/settings internal/apikey internal/identity/httpapi/authctx internal/server/httpx`, Tests: "internal/identity internal/testutil/postgrescontainer"},
+		"internal/bstats":       {Production: "internal/bstats/... internal/settings", Tests: ""},
+		"internal/plugin":       {Production: `internal/plugin/... internal/pkg/apperror internal/server/... internal/identity/httpapi/authctx ent/... plugin-sdk/go/...`, Tests: `internal/testutil/postgrescontainer internal/infra/crypto internal/identity migrations`},
 		"internal/mcp": {Production: `internal/mcp/... internal/identity internal/identity/provider internal/identity/httpapi internal/identity/httpapi/authctx
 internal/audit internal/server/adminapi internal/server/httpx`, Tests: `ent ent/runtime internal/identity/postgres internal/infra/crypto internal/testutil/postgrescontainer migrations`},
-		"internal/requestlog": {Production: `internal/requestlog/... internal/infra/telemetry/... internal/identity/httpapi/authctx internal/server/httpx`, Tests: `internal/testutil/postgrescontainer migrations`},
+		"internal/requestlog": {Production: `internal/usage internal/requestlog/... internal/infra/telemetry/... internal/identity/httpapi/authctx internal/server/httpx`, Tests: `internal/testutil/postgrescontainer migrations`},
 		"internal/modelcatalog": {Production: `internal/pkg/locale internal/modelcatalog internal/modelcatalog/provider internal/billing/pricing
 internal/egress internal/infra/httpclient/... internal/infra/telemetry/...`, Tests: `internal/billing internal/billing/provider
 internal/gateway/media internal/gateway/provider/modelidentity internal/routing/capability
@@ -121,7 +128,7 @@ internal/upstream/grok internal/upstream/openai`},
 internal/promotion internal/protocol internal/routing internal/routing/accessview
 internal/routing/capability internal/scheduler/policy internal/site`, Tests: ""},
 		"internal/provider": {Production: `internal/server/adminapi internal/modelcatalog ent/... internal/provider/... internal/billing internal/egress internal/egress/httpapi/dto
-internal/egress/provider internal/idempotency internal/idempotency/httpapi internal/identity/contact
+internal/egress/provider internal/idempotency internal/idempotency/httpapi internal/identity/contact internal/identity/httpapi/authctx
 internal/infra/httpclient/... internal/infra/postgres/... internal/infra/redis/...
 internal/infra/telemetry/... internal/pkg/ internal/protocol internal/protocol/anthropic
 internal/protocol/gemini internal/protocol/google internal/protocol/grok internal/protocol/openai internal/protocol/systemone
@@ -224,7 +231,7 @@ internal/promotion internal/server/httpx internal/settings`, Tests: "internal/te
 internal/identity/httpapi/dto internal/pkg/ internal/promotion/... internal/server/httpx
 internal/settings`, Tests: ""},
 		"internal/protocol": {Production: "internal/protocol/...", Tests: "internal/testutil/assertion"},
-		"internal/routing": {Production: `internal/server/adminapi internal/modelcatalog ent/... internal/provider internal/apikey/httpapi/dto internal/billing internal/billing/pricing
+		"internal/routing": {Production: `internal/identity/httpapi/authctx internal/server/adminapi internal/modelcatalog ent/... internal/provider internal/apikey/httpapi/dto internal/billing internal/billing/pricing
 internal/billing/provider internal/ops/monitor internal/idempotency internal/idempotency/httpapi
 internal/infra/postgres/... internal/infra/telemetry/... internal/pkg/ internal/protocol
 internal/protocol/openai internal/routing/... internal/scheduler/policy internal/server/httpx
@@ -247,11 +254,11 @@ internal/config internal/egress internal/gateway internal/gateway/httpapi intern
 internal/gateway/provider/selection internal/gateway/requeststate internal/gateway/session
 internal/gateway/testkit internal/gateway/tierpolicy internal/identity/testkit
 internal/infra/httpclient/... internal/notification internal/ops internal/payment internal/promotion
-internal/protocol internal/routing internal/routing/accessview internal/routing/capability
+internal/protocol internal/protocol/systemone internal/routing internal/routing/accessview internal/routing/capability
 internal/routing/httpapi/dto internal/scheduler internal/settings/httpapi internal/settings/testkit
 internal/site internal/team internal/upstream/anthropic internal/upstream/openai internal/usage
 internal/usage/httpapi internal/usage/httpapi/ports`},
-		"internal/settings": {Production: `internal/server/adminapi internal/gateway/ws ent/... internal/provider internal/audit internal/billing internal/billing/httpapi internal/config
+		"internal/settings": {Production: `internal/bstats internal/server/adminapi internal/gateway/ws ent/... internal/provider internal/audit internal/billing internal/billing/httpapi internal/config
 internal/creative internal/gateway internal/gateway/admission internal/gateway/clientmeta
 internal/gateway/httpapi/dto internal/gateway/promptpolicy internal/gateway/testkit
 internal/gateway/tierpolicy internal/identity internal/identity/authconfig internal/identity/contact
@@ -394,8 +401,15 @@ internal/upstream/zhipu/...`, Tests: ""},
 	}
 
 	pureFileStandard = map[string]string{
-		"internal/pkg/locale/locale.go": "embed golang.org/x/text/language",
-		"internal/pkg/locale/errors.go": "embed unicode",
+		// SystemOne parses buffered multipart envelopes without acquiring files or
+		// network connections; only the codec and its fixture builder need MIME helpers.
+		"internal/protocol/systemone/payload.go":      "mime mime/multipart",
+		"internal/protocol/systemone/payload_test.go": "mime/multipart",
+		// Deterministic reference fixtures and allocation regression checks need
+		// random sampling and runtime counters in this test file only.
+		"internal/protocol/systemone/references_test.go": "math/rand/v2 runtime",
+		"internal/pkg/locale/locale.go":                  "embed golang.org/x/text/language",
+		"internal/pkg/locale/errors.go":                  "embed unicode",
 		// 请求取消测试使用虚拟时钟检查截止时间和异步回调。
 		"internal/pkg/requestcontext/context_test.go":          "testing/synctest",
 		"internal/gateway/clientmeta/claude_validator_test.go": "net/http net/http/httptest os",
@@ -408,15 +422,20 @@ internal/upstream/zhipu/...`, Tests: ""},
 		"internal/backup/backup_external_test.go":            "database/sql",
 		"internal/gateway/httpapi/live_test.go":              "database/sql",
 		"internal/moderation/helpers_test.go":                "database/sql",
-		"internal/moderation/service_test.go":                "database/sql",
 		"internal/usage/httpapi/admin/usage_handler_test.go": "database/sql",
 	}
 
-	// 窄权限属于指定文件，不能由相邻文件或目标子包继承。
+	// File permissions bind imports to reviewed source files; neighboring files
+	// and target subpackages do not inherit these permissions.
 	filePermissions = []filePermission{
 		// Browser control is limited to the isolated drawing screenshot adapter.
 		{Scope: "internal/intelligence/provider", Imports: "github.com/chromedp/chromedp github.com/chromedp/cdproto/cdp github.com/chromedp/cdproto/fetch", Files: "thumbnail.go"},
 		{Scope: "internal/ticket", Imports: "github.com/pdfcpu/pdfcpu/pkg/pdfcpu github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types", Files: "attachment_pdf.go"},
+		// Personal marketplace requests read the JWT subject through the shared identity context.
+		{Scope: "internal/routing/httpapi", Imports: "internal/identity/httpapi/authctx", Files: "marketplace.go marketplace_test.go group_handler_test.go"},
+		// The composite-key scenario reads the actual SystemOne envelope after
+		// middleware rewriting, keeping its assertions aligned with the protocol parser.
+		{Scope: "internal/server", Imports: "internal/protocol/systemone", Files: "middleware/api_key_model_scenario_test.go"},
 		// OAuth registration hashes confidential-client secrets; revocation tests verify their authentication behavior.
 		{Scope: "internal/identity/provider", Imports: "golang.org/x/crypto/bcrypt", Files: "mcp_oauth_clients.go mcp_oauth_test.go"},
 		// Protocol acceptance uses migrated PostgreSQL and the production account reader on one connection pool.
@@ -424,12 +443,13 @@ internal/upstream/zhipu/...`, Tests: ""},
 		// Creative's OpenAI adapter uses the shared native Images reader for mode
 		// conversion; adjacent creative files retain their existing dependency limits.
 		{Scope: "internal/creative", Imports: "internal/upstream/openai", Files: "provider/openai.go"},
-		{Scope: "internal/gateway", Imports: "internal/modelcatalog/testkit", Files: "httpapi/grok_media_execution_test.go httpapi/helpers_test.go provider/creative_catalog_test.go provider/googleforward/gemini_attempts_external_test.go provider/googleforward/gemini_openai_external_test.go provider/googleforward/helpers_external_test.go provider/grok_codec_test.go provider/model_attributes_test.go provider/model_qualification_test.go provider/selection/candidate_policy_test.go testkit/runtime_settings.go ws/httpapi/openai_ws_http_bridge_test.go"},
+		{Scope: "internal/gateway", Imports: "internal/modelcatalog/testkit", Files: "httpapi/grok_media_execution_test.go httpapi/helpers_test.go provider/creative_catalog_test.go provider/googleforward/gemini_attempts_external_test.go provider/googleforward/gemini_openai_external_test.go provider/googleforward/helpers_external_test.go provider/grok_codec_test.go provider/model_attributes_test.go provider/model_qualification_test.go provider/selection/candidate_policy_test.go provider/selection/probes_test.go testkit/runtime_settings.go ws/httpapi/openai_ws_http_bridge_test.go"},
 		// Timing observers and response-body decoding tests inspect protocol events through these permitted files.
 		{Scope: "internal/infra", Imports: "github.com/tidwall/gjson", Files: "telemetry/timing/events.go telemetry/timing/performance.go httpclient/response_body_test.go"},
-		// 目录读取与测试数据构造按实际调用文件登记。
+		// Catalogue readers and offline capability fixtures receive permissions only
+		// in the production or test files that consume them.
 		{Scope: "internal/gateway/provider", Imports: "internal/modelcatalog", Files: "selection/candidate_policy_test.go model_qualification_test.go model_display.go model_attributes.go model_catalogue.go creative_catalog.go execution_provider.go qoder_runtime.go responses_effort.go grok_codec_test.go model_attributes_test.go googleforward/antigravity_openai.go googleforward/model_attributes.go googleforward/gemini_attempts_external_test.go googleforward/gemini_openai_external_test.go grokforward/contracts.go grokforward/responses.go openaiforward/transform_ports.go openaiforward/passthrough_ports.go messageforward/bedrock.go modelidentity/thinking.go"},
-		{Scope: "internal/gateway/provider", Imports: "internal/modelcatalog/testkit", Files: "grok_codec_test.go model_attributes_test.go creative_catalog_test.go model_qualification_test.go selection/candidate_policy_test.go googleforward/gemini_openai_external_test.go googleforward/gemini_attempts_external_test.go googleforward/helpers_external_test.go"},
+		{Scope: "internal/gateway/provider", Imports: "internal/modelcatalog/testkit", Files: "grok_codec_test.go model_attributes_test.go creative_catalog_test.go model_qualification_test.go selection/candidate_policy_test.go selection/probes_test.go googleforward/gemini_openai_external_test.go googleforward/gemini_attempts_external_test.go googleforward/helpers_external_test.go"},
 		{Scope: "internal/provider/httpapi", Imports: "internal/modelcatalog/testkit", Files: "management_catalog_test.go provider_probe_scenario_test.go"},
 		// Token persistence tests round-trip real ciphertext through the migrated store and identity service.
 		{Scope: "internal/identity/postgres", Imports: "internal/infra/crypto", Files: "mcp_tokens_integration_test.go"},
@@ -444,7 +464,7 @@ internal/upstream/zhipu/...`, Tests: ""},
 		{Scope: "internal/usage/postgres", Imports: "internal/testutil/rediscontainer", Files: "main_integration_test.go"},
 		{Scope: "internal/usage/rediscache", Imports: "internal/testutil/rediscontainer", Files: "dashboard_integration_test.go"},
 		{Scope: "internal/testutil/rediscontainer", Imports: "github.com/testcontainers/testcontainers-go github.com/testcontainers/testcontainers-go/wait", Files: "run.go"},
-		{Scope: "migrations", Imports: "internal/infra/postgres github.com/lib/pq github.com/testcontainers/testcontainers-go/modules/postgres", Files: "platform_independent_groups_integration_test.go platform_independent_pricing_integration_test.go provider_names_integration_test.go product_brand_integration_test.go antigravity_retirement_integration_test.go user_localization_integration_test.go responses_ws_integration_test.go request_lookup_integration_test.go provider_balance_alert_integration_test.go usage_performance_integration_test.go custom_video_resolution_integration_test.go user_id_start_integration_test.go universal_api_key_routing_integration_test.go explicit_api_key_routing_integration_test.go"},
+		{Scope: "migrations", Imports: "internal/infra/postgres github.com/lib/pq github.com/testcontainers/testcontainers-go/modules/postgres", Files: "platform_independent_groups_integration_test.go platform_independent_pricing_integration_test.go provider_names_integration_test.go product_brand_integration_test.go antigravity_retirement_integration_test.go user_localization_integration_test.go responses_ws_integration_test.go request_lookup_integration_test.go provider_balance_alert_integration_test.go usage_performance_integration_test.go custom_video_resolution_integration_test.go user_id_start_integration_test.go universal_api_key_routing_integration_test.go explicit_api_key_routing_integration_test.go system_model_usage_integration_test.go"},
 		{Scope: "internal/usage/postgres", Imports: "internal/ops/postgres", Files: "platform_snapshot_scenario_integration_test.go"},
 		{Scope: "internal/provider", Imports: "internal/provider/provider", Files: "admin_edit_external_test.go helpers_external_test.go shadow_external_test.go"},
 		{Scope: "internal/apikey", Imports: "internal/apikey/postgres", Files: "admin_external_test.go"},
@@ -472,7 +492,7 @@ internal/upstream/zhipu/...`, Tests: ""},
 		{Scope: "internal/identity", Imports: "internal/identity/provider", Files: "helpers_external_test.go dingtalk_oauth_external_test.go dingtalk_profile_sync_external_test.go dingtalk_sync_runtime_external_test.go"},
 		{Scope: "internal/identity/postgres", Imports: "internal/billing/postgres", Files: "auth_state.go user_repo.go"},
 		{Scope: "internal/identity/postgres", Imports: "internal/usage/postgres/query", Files: "user_repo.go"},
-		{Scope: "internal/moderation", Imports: "internal/moderation/provider", Files: "service_test.go helpers_test.go"},
+		{Scope: "internal/moderation", Imports: "internal/moderation/provider", Files: "helpers_test.go"},
 		{Scope: "internal/moderation/postgres", Imports: "internal/identity/postgres", Files: "repository_test.go"},
 		{Scope: "internal/payment/postgres", Imports: "internal/billing/postgres", Files: "checkout_scenario_test.go checkout_integration_test.go"},
 		{Scope: "internal/payment", Imports: "internal/testutil/postgrescontainer", Files: "postgres/checkout_integration_test.go postgres/recharge_bonus_integration_test.go"},

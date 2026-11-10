@@ -54,10 +54,15 @@ type UserCheckoutInfoResponse struct {
 	Plans []UserCheckoutPlan `json:"plans"`
 	// balance purchase disabled flag.
 	BalanceDisabled bool `json:"balance_disabled"`
-	// credited points per principal.
-	BalanceRechargeMultiplier float64                     `json:"balance_recharge_multiplier"`
-	RechargeBonusTiers        []payment.RechargeBonusTier `json:"recharge_bonus_tiers,omitempty"`  // cumulative purchased-credit reward thresholds
-	RechargeBonusNotice       string                      `json:"recharge_bonus_notice,omitempty"` // public recharge promotion description
+	// effective credited points per principal.
+	BalanceRechargeMultiplier float64 `json:"balance_recharge_multiplier"`
+	// normalized global recharge rate.
+	DefaultBalanceRechargeMultiplier float64 `json:"default_balance_recharge_multiplier"`
+	// UserBalanceRechargeMultiplier is null when the buyer follows global terms.
+	// A supplied value remains explicit even when it equals the global rate.
+	UserBalanceRechargeMultiplier *float64                    `json:"user_balance_recharge_multiplier"`
+	RechargeBonusTiers            []payment.RechargeBonusTier `json:"recharge_bonus_tiers,omitempty"`  // cumulative purchased-credit reward thresholds
+	RechargeBonusNotice           string                      `json:"recharge_bonus_notice,omitempty"` // public recharge promotion description
 	// RechargeBonusActivity is included when a gift rule or landing page is
 	// configured. It contains presentation and schedules used by checkout previews.
 	RechargeBonusActivity *payment.RechargeBonusActivity `json:"recharge_bonus_activity,omitempty"`
@@ -365,8 +370,8 @@ func (h *PaymentHandler) GetPlans(c *gin.Context) {
 }
 
 // GetCheckoutInfo assembles available method limits, checkout configuration
-// and sale-plan displays for one page response. Limit/configuration errors
-// abort the request, while the sale-plan read error is discarded.
+// and sale-plan displays for the authenticated buyer. Limit, configuration and
+// buyer lookup errors abort the request, while the sale-plan read error is discarded.
 //
 // The Alipay mobile preference requires its setting and a current
 // official-source resolution; source errors remain visible. Plan group
@@ -376,7 +381,12 @@ func (h *PaymentHandler) GetPlans(c *gin.Context) {
 // display list rather than failing this combined endpoint.
 // A configured campaign also reads the authenticated buyer's confirmed progress;
 // an error aborts the response so previews cannot assume rewards are still unclaimed.
+// Default and explicit personal rates accompany the effective credit rate.
 func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
+	subject, ok := UserRequireAuth(c)
+	if !ok {
+		return
+	}
 	ctx := c.Request.Context()
 
 	limitsResp, err := h.configService.GetAvailableMethodLimits(ctx)
@@ -386,6 +396,11 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 	}
 
 	cfg, err := h.configService.GetPaymentConfig(ctx)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	rates, err := h.paymentService.GetBalanceRechargeRates(ctx, subject.UserID, cfg.BalanceRechargeMultiplier)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -445,25 +460,27 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 		bonusProgress = &progress
 	}
 	response.Success(c, UserCheckoutInfoResponse{
-		Methods:                       limitsResp.Methods,
-		GlobalMin:                     limitsResp.GlobalMin,
-		GlobalMax:                     limitsResp.GlobalMax,
-		Plans:                         planList,
-		BalanceDisabled:               cfg.BalanceDisabled,
-		BalanceRechargeMultiplier:     cfg.BalanceRechargeMultiplier,
-		RechargeBonusTiers:            cfg.RechargeBonusTiers,
-		RechargeBonusNotice:           cfg.RechargeBonusNotice,
-		RechargeBonusActivity:         bonusActivity,
-		RechargeBonusProgress:         bonusProgress,
-		ServerTime:                    serverTime,
-		SubscriptionUSDToCNYRate:      cfg.SubscriptionUSDToCNYRate,
-		RechargeFeeRate:               cfg.RechargeFeeRate,
-		MethodFees:                    cfg.MethodFees,
-		HelpText:                      cfg.HelpText,
-		HelpImageURL:                  cfg.HelpImageURL,
-		StripePublishableKey:          cfg.StripePublishableKey,
-		AlipayForceQRCode:             cfg.AlipayForceQRCode,
-		AlipayMobilePrecreateDeepLink: alipayMobilePrecreateDeepLink,
+		Methods:                          limitsResp.Methods,
+		GlobalMin:                        limitsResp.GlobalMin,
+		GlobalMax:                        limitsResp.GlobalMax,
+		Plans:                            planList,
+		BalanceDisabled:                  cfg.BalanceDisabled,
+		BalanceRechargeMultiplier:        rates.Effective,
+		DefaultBalanceRechargeMultiplier: rates.Default,
+		UserBalanceRechargeMultiplier:    rates.User,
+		SubscriptionUSDToCNYRate:         cfg.SubscriptionUSDToCNYRate,
+		RechargeFeeRate:                  cfg.RechargeFeeRate,
+		MethodFees:                       cfg.MethodFees,
+		HelpText:                         cfg.HelpText,
+		HelpImageURL:                     cfg.HelpImageURL,
+		StripePublishableKey:             cfg.StripePublishableKey,
+		AlipayForceQRCode:                cfg.AlipayForceQRCode,
+		AlipayMobilePrecreateDeepLink:    alipayMobilePrecreateDeepLink,
+		RechargeBonusTiers:               cfg.RechargeBonusTiers,
+		RechargeBonusNotice:              cfg.RechargeBonusNotice,
+		RechargeBonusActivity:            bonusActivity,
+		RechargeBonusProgress:            bonusProgress,
+		ServerTime:                       serverTime,
 	})
 }
 

@@ -11,10 +11,10 @@ import (
 // snapshot.go produces full provider payloads and filtered metadata for
 // scheduler cache readers.
 // Snapshot buckets read slim provider metadata before an execution adapter
-// obtains the full credential-bearing record. Metadata keeps the protocol,
-// model, quota and session inputs used before hydration, including selected
-// credential fields such as api_key, while dropping hydrated group graphs and
-// unrelated extra values.
+// obtains the full credential-bearing record. Metadata keeps the endpoint,
+// protocol, model, quota and session inputs used before hydration, including
+// selected credential fields such as api_key, while dropping hydrated group
+// graphs and unrelated extra values.
 //
 // The filtered outer maps and membership slices are newly allocated, but
 // retained nested values and scalar pointers continue to refer to the
@@ -239,6 +239,10 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	// retain the configured identity, model and protocol fields their provider
 	// methods consume.
 	keys := []string{
+		// Attribute lookup distinguishes relay models from the platform's official
+		// service before hydration; omitting the address can reject valid image
+		// references.
+		"base_url",
 		"model_mapping",
 		"compact_model_mapping",
 		"model_whitelist",
@@ -250,6 +254,8 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 		"opencode_catalog_protocols",
 		"api_protocol",
 		"openai_workload_capabilities",
+		"images_generations_mode",
+		"images_edits_mode",
 		"api_key",
 		"project_id",
 		"oauth_type",
@@ -283,6 +289,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 	// capabilities before hydration, so this allowlist carries the runtime
 	// observations used by those checks.
 	keys := []string{
+		"images_gif_enabled",
 		"quota_limit",
 		"quota_used",
 		"quota_daily_limit",

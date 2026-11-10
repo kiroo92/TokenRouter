@@ -9,18 +9,27 @@
         data-testid="payment-preset-amount"
         :aria-pressed="modelValue === amt"
         :class="[
-          'rounded-control border px-3 text-center text-sm font-medium tabular-nums transition-colors',
+          'relative rounded-control border px-3 text-center text-sm font-medium tabular-nums transition-colors',
           $slots['amount-extra']
             ? 'flex min-h-16 flex-col items-center justify-center gap-1 py-2'
             : 'h-9',
           modelValue === amt
-            ? 'border-primary-500 bg-primary-500/8 text-primary-600 ring-1 ring-primary-500 dark:text-primary-400'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-dark-600 dark:bg-dark-950 dark:text-dark-100 dark:hover:border-dark-500',
+            ? 'border-gray-300 bg-gray-100 font-semibold text-gray-900 dark:border-dark-500 dark:bg-dark-700 dark:text-dark-100'
+            : 'border-gray-200 bg-white font-medium text-gray-700 hover:border-gray-300 dark:border-dark-600 dark:bg-dark-950 dark:text-dark-100 dark:hover:border-dark-500',
         ]"
         @click="selectAmount(amt)"
       >
         <span>{{ amt }}</span>
         <slot name="amount-extra" :amount="amt" />
+        <!-- Keep the amount centered while the check marks the selected preset at its trailing edge. -->
+        <Icon
+          v-if="modelValue === amt"
+          name="check"
+          size="xs"
+          class="pointer-events-none absolute inset-y-0 right-1 my-auto text-emerald-700 sm:right-2 dark:text-emerald-400"
+          :stroke-width="3"
+          :animate-on-hover="false"
+        />
       </button>
     </div>
 
@@ -57,6 +66,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import Icon from '@/components/icons/Icon.vue'
 import { currencySymbol } from '@/utils/payment/currency'
 
 /**

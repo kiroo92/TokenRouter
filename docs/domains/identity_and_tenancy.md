@@ -61,7 +61,7 @@ MCP 专用令牌属于签发它的管理员，保存独立的操作权限、有�
 
 公开的认证操作通过统一的验证码入口选择 Cloudflare Turnstile、腾讯天御或阿里云验证码 2.0，三者同时只能启用一个。普通登录、注册、验证码发送和密码找回会校验当前启用的验证码。腾讯天御和阿里云还保护 Passkey 登录的 begin 和 OAuth 登录的 start；票据只随触发它的操作提交，finish 和 callback 不再使用这张票据。腾讯天御的 `cn` 和 `intl` 站点要求前端 SDK 和服务端校验 endpoint 一致。国际站先在当前表单容器里显示 checkbox，成功拿到的票据只缓存给一次操作使用，过期、操作失败或手动重置后立即销毁并重新初始化。
 
-OAuth 当前用户绑定的 start 要求用户已登录，匿名登录用的验证码在这里不需要。验证码已启用、但服务或必要凭据配置不完整时，拒绝请求。
+OAuth 当前用户绑定的 start 要求用户已登录，匿名登录用的验证码在这里不需要。验证码已启用、但服务或必要凭据配置不完整时，拒绝请求。`VerifyOptionalCaptcha` 返回本次验证使用的配置是否启用验证码，供插件决定关闭验证码时的业务行为；认证入口 `VerifyCaptcha` 仍在该结果上执行启动配置中的必需验证码检查。
 
 ### Google One Tap
 
@@ -163,6 +163,8 @@ Email 绑定有单独的验证码和密码设置流程：
 解绑后，用户至少要保留一个可以登录的身份。Email 不走第三方解绑；LinuxDo、OIDC、WeChat 和 DingTalk 的自助解绑，根据用户当前的身份集合判断是否允许。实际解绑成功且认证服务可用时，handler 调用 `RevokeAllUserTokens` 尝试清理 refresh token 会话；已有 access token 仍按上面的会话校验规则判断有效性。外部 provider 远端的授权是否一并撤销，取决于各自的实现；只删除本地记录时，远端 token 可能仍然有效。
 
 ## 用户属性与来源
+
+集成侧的精确用户查找使用 `UserService.LookupUsersExact`，与管理员模糊搜索分开。它只按 ID、用户名或大小写不敏感的邮箱相等条件读取未删除账号，返回最多 100 条资料及头像 URL，不读取备注、密码、API Key 或任意身份 metadata。插件的邮箱权限与返回字段筛选由插件模块另外检查。
 
 自定义用户属性分为 definition 和 value。definition 包含唯一 key、展示名、类型、options、required、validation、排序和 enabled；每个用户在每个 definition 下最多一个 value。类型支持 `text`、`textarea`、`number`、`email`、`url`、`date`、`select` 和 `multi_select`。值以字符串保存，multi-select 保存为 JSON 数组字符串。
 

@@ -212,6 +212,8 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
 import { sanitizeSvg } from '@/utils/sanitize'
+import { usePluginsStore } from '@/stores/plugins'
+import type { PluginAudience } from '@/api/plugins.types'
 
 // AppSidebar.vue renders user and administrator navigation with the shared icon
 // and menu styles. Role checks and public feature settings determine available
@@ -248,6 +250,7 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
 const adminSettingsStore = useAdminSettingsStore()
+const pluginsStore = usePluginsStore()
 
 // Sidebar width and mobile visibility come from shared application state, allowing the
 // header toggle and layout offsets to follow the same values.
@@ -294,6 +297,28 @@ const flagTeamAccess = () => appStore.cachedPublicSettings?.team_enabled !== fal
 // An omitted setting keeps the entry visible, matching the optional feature predicate
 // used by both personal and user menus.
 const flagUsageRankingAccess = () => appStore.cachedPublicSettings?.usage_ranking_enabled !== false
+
+/** pluginNavItems projects accepted menus into the existing sanitized sidebar renderer.
+ * Audience filtering preserves administrator and personal sections. Ordering uses the
+ * declared priority, plugin ID, then declaration order without mutating store descriptions.
+ */
+function pluginNavItems(audience: PluginAudience): NavItem[] {
+  return pluginsStore.plugins
+    .flatMap((plugin) => plugin.menus.map((menu, index) => ({ pluginId: plugin.id, menu, index })))
+    .filter((entry) => entry.menu.audience === audience)
+    .sort(
+      (a, b) =>
+        a.menu.order - b.menu.order ||
+        a.pluginId.localeCompare(b.pluginId, 'en') ||
+        a.index - b.index,
+    )
+    .map(({ menu }) => ({
+      path: menu.route,
+      label: menu.label,
+      icon: null,
+      iconSvg: menu.icon_svg,
+    }))
+}
 
 // userNavItems builds the regular user menu from public feature settings and
 // administrator-configured links. The model marketplace follows the dashboard,
@@ -362,6 +387,7 @@ const userNavItems = computed((): NavItem[] => {
       icon: null,
       iconSvg: item.icon_svg,
     })),
+    ...pluginNavItems('user'),
     { path: '/account-pool', label: t('remotePool.title'), icon: 'server' as const },
     {
       path: '/intelligence',
@@ -447,6 +473,7 @@ const personalNavItems = computed((): NavItem[] => {
       icon: null,
       iconSvg: item.icon_svg,
     })),
+    ...pluginNavItems('user'),
     { path: '/account-pool', label: t('remotePool.title'), icon: 'server' as const },
     {
       path: '/intelligence',
@@ -596,6 +623,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/requests', label: t('requests.title'), icon: 'search' as const },
     { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: 'shieldCheck' as const },
     { path: '/admin/mcp', label: t('admin.mcp.title'), icon: 'key' as const },
+    { path: '/admin/plugins', label: t('admin.plugins.title'), icon: 'puzzle' as const },
   ]
 
   const visibleItems = baseItems.filter((item) => item.featureFlag?.() !== false)
@@ -610,6 +638,7 @@ const adminNavItems = computed((): NavItem[] => {
       iconSvg: cm.icon_svg,
     })
   }
+  visibleItems.push(...pluginNavItems('admin'))
   if (flagTicketAccess()) {
     visibleItems.push({
       path: '/admin/tickets',

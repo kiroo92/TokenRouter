@@ -101,19 +101,20 @@
         </div>
       </section>
 
+      <!-- Each link covers its card, and flexible text panels align the links along the bottom when descriptions wrap. -->
       <section class="mx-auto mt-20 grid max-w-7xl gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <article
-          class="group overflow-hidden rounded-surface border border-gray-200 bg-white shadow-sm ring-1 ring-transparent transition duration-layout hover:-translate-y-1 hover:border-black/20 hover:shadow-[0_12px_32px_rgba(0,0,0,0.1)] focus-within:border-black/20 dark:border-dark-800 dark:bg-dark-900 dark:hover:border-dark-600 dark:hover:shadow-[0_12px_32px_rgba(0,0,0,0.4)]"
+          class="group relative isolate flex flex-col overflow-hidden rounded-surface border border-gray-200 bg-white transition-colors duration-fast hover:border-black/20 focus-within:border-black/20 dark:border-dark-800 dark:bg-dark-900 dark:hover:border-dark-600"
         >
           <div
-            class="relative h-44 overflow-hidden border-b border-gray-200 bg-white dark:border-dark-800 dark:bg-dark-950"
+            class="relative h-44 shrink-0 overflow-hidden border-b border-gray-200 bg-[var(--page-bg)] dark:border-dark-800"
           >
             <div
-              class="absolute inset-0 transition-transform duration-500 ease-out group-hover:scale-110"
+              class="absolute inset-0 transition-transform duration-normal motion-safe:group-hover:scale-105"
             >
               <span
-                v-for="(icon, index) in homeProviderCloudIcons"
-                :key="`${icon.brand}-${index}`"
+                v-for="icon in homeProviderCloudIcons"
+                :key="icon.brand"
                 class="absolute flex h-7 w-7 items-center justify-center rounded-full border border-gray-100 bg-white/95 text-gray-700 shadow-[0_5px_16px_rgba(0,0,0,0.13)] ring-1 ring-black/[0.02] dark:border-dark-700 dark:bg-dark-900 dark:text-dark-100 dark:ring-white/[0.04]"
                 :style="{
                   left: icon.left,
@@ -125,11 +126,8 @@
                 <ProviderIcon :brand="icon.brand" size="14px" />
               </span>
             </div>
-            <span
-              class="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-white via-white/35 to-transparent dark:from-dark-950 dark:via-dark-950/35"
-            ></span>
           </div>
-          <div class="p-5">
+          <div class="flex flex-1 flex-col p-5">
             <h2 class="text-base font-semibold text-gray-900 dark:text-white">
               {{ t('home.features.unifiedGateway') }}
             </h2>
@@ -138,7 +136,7 @@
             </p>
             <router-link
               to="/models"
-              class="mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-300"
+              class="mt-auto inline-flex items-center gap-1 self-start pt-4 text-sm font-medium home-feature-link text-link"
             >
               {{ t('home.features.browseAll') }}
               <Icon name="arrowRight" size="xs" />
@@ -147,13 +145,13 @@
         </article>
 
         <article
-          class="group overflow-hidden rounded-surface border border-gray-200 bg-white shadow-sm ring-1 ring-transparent transition duration-layout hover:-translate-y-1 hover:border-black/20 hover:shadow-[0_12px_32px_rgba(0,0,0,0.1)] focus-within:border-black/20 dark:border-dark-800 dark:bg-dark-900 dark:hover:border-dark-600 dark:hover:shadow-[0_12px_32px_rgba(0,0,0,0.4)]"
+          class="group relative isolate flex flex-col overflow-hidden rounded-surface border border-gray-200 bg-white transition-colors duration-fast hover:border-black/20 focus-within:border-black/20 dark:border-dark-800 dark:bg-dark-900 dark:hover:border-dark-600"
         >
           <div
-            class="relative flex h-44 items-center justify-center overflow-hidden border-b border-gray-200 bg-white dark:border-dark-800 dark:bg-dark-950"
+            class="relative flex h-44 shrink-0 items-center justify-center overflow-hidden border-b border-gray-200 bg-[var(--page-bg)] dark:border-dark-800"
           >
             <div
-              class="relative h-full w-full transition-transform duration-500 ease-out group-hover:scale-110"
+              class="relative h-full w-full transition-transform duration-normal motion-safe:group-hover:scale-105"
             >
               <div
                 class="absolute left-1/2 top-7 z-10 max-w-[82%] -translate-x-1/2 truncate rounded-control bg-gray-100 px-3.5 py-1.5 text-xs font-medium text-gray-800 shadow-sm dark:bg-dark-900 dark:text-dark-100"
@@ -187,12 +185,12 @@
                   :key="brand"
                   class="flex h-9 w-9 items-center justify-center rounded-control border border-gray-100 bg-white text-gray-700 shadow-[0_5px_16px_rgba(0,0,0,0.13)] dark:border-dark-700 dark:bg-dark-900 dark:text-dark-100"
                 >
-                  <ProviderIcon :brand="brand" size="17px" />
+                  <ProviderIcon :brand="brand" size="20px" />
                 </span>
               </div>
             </div>
           </div>
-          <div class="p-5">
+          <div class="flex flex-1 flex-col p-5">
             <h2 class="text-base font-semibold text-gray-900 dark:text-white">
               {{ t('home.features.multiProvider') }}
             </h2>
@@ -201,7 +199,7 @@
             </p>
             <router-link
               :to="isAuthenticated ? dashboardPath : '/login'"
-              class="mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-300"
+              class="mt-auto inline-flex items-center gap-1 self-start pt-4 text-sm font-medium home-feature-link text-link"
             >
               {{ t('home.features.learnMore') }}
               <Icon name="arrowRight" size="xs" />
@@ -210,13 +208,13 @@
         </article>
 
         <article
-          class="group overflow-hidden rounded-surface border border-gray-200 bg-white shadow-sm ring-1 ring-transparent transition duration-layout hover:-translate-y-1 hover:border-black/20 hover:shadow-[0_12px_32px_rgba(0,0,0,0.1)] focus-within:border-black/20 dark:border-dark-800 dark:bg-dark-900 dark:hover:border-dark-600 dark:hover:shadow-[0_12px_32px_rgba(0,0,0,0.4)]"
+          class="group relative isolate flex flex-col overflow-hidden rounded-surface border border-gray-200 bg-white transition-colors duration-fast hover:border-black/20 focus-within:border-black/20 dark:border-dark-800 dark:bg-dark-900 dark:hover:border-dark-600"
         >
           <div
-            class="flex h-44 items-center justify-center border-b border-gray-200 bg-gray-50 p-6 dark:border-dark-800 dark:bg-dark-950"
+            class="flex h-44 shrink-0 items-center justify-center overflow-hidden border-b border-gray-200 bg-[var(--page-bg)] p-6 dark:border-dark-800"
           >
             <div
-              class="w-full max-w-[200px] rounded-surface border border-gray-200 bg-white p-4 shadow-sm transition-transform duration-500 ease-out group-hover:scale-110 dark:border-dark-700 dark:bg-dark-900"
+              class="w-full max-w-[200px] rounded-surface border border-gray-200 bg-white p-4 shadow-sm transition-transform duration-normal motion-safe:group-hover:scale-105 dark:border-dark-700 dark:bg-dark-900"
             >
               <div
                 class="mb-4 flex items-center justify-between text-xs text-gray-500 dark:text-dark-400"
@@ -232,7 +230,7 @@
               </div>
             </div>
           </div>
-          <div class="p-5">
+          <div class="flex flex-1 flex-col p-5">
             <h2 class="text-base font-semibold text-gray-900 dark:text-white">
               {{ t('home.features.balanceQuota') }}
             </h2>
@@ -241,7 +239,7 @@
             </p>
             <router-link
               :to="isAuthenticated ? dashboardPath : '/login'"
-              class="mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-300"
+              class="mt-auto inline-flex items-center gap-1 self-start pt-4 text-sm font-medium home-feature-link text-link"
             >
               {{ t('home.features.viewUsage') }}
               <Icon name="arrowRight" size="xs" />
@@ -250,13 +248,13 @@
         </article>
 
         <article
-          class="group overflow-hidden rounded-surface border border-gray-200 bg-white shadow-sm ring-1 ring-transparent transition duration-layout hover:-translate-y-1 hover:border-black/20 hover:shadow-[0_12px_32px_rgba(0,0,0,0.1)] focus-within:border-black/20 dark:border-dark-800 dark:bg-dark-900 dark:hover:border-dark-600 dark:hover:shadow-[0_12px_32px_rgba(0,0,0,0.4)]"
+          class="group relative isolate flex flex-col overflow-hidden rounded-surface border border-gray-200 bg-white transition-colors duration-fast hover:border-black/20 focus-within:border-black/20 dark:border-dark-800 dark:bg-dark-900 dark:hover:border-dark-600"
         >
           <div
-            class="flex h-44 items-center justify-center border-b border-gray-200 bg-gray-50 dark:border-dark-800 dark:bg-dark-950"
+            class="flex h-44 shrink-0 items-center justify-center overflow-hidden border-b border-gray-200 bg-[var(--page-bg)] dark:border-dark-800"
           >
             <div
-              class="relative flex h-24 w-24 items-center justify-center rounded-full border border-gray-200 bg-white shadow-sm transition-transform duration-500 ease-out group-hover:scale-110 dark:border-dark-700 dark:bg-dark-900"
+              class="relative flex h-24 w-24 items-center justify-center rounded-full border border-gray-200 bg-white shadow-sm transition-transform duration-normal motion-safe:group-hover:scale-105 dark:border-dark-700 dark:bg-dark-900"
             >
               <Icon name="shield" size="xl" class="text-gray-400 dark:text-dark-300" />
               <span
@@ -266,7 +264,7 @@
               </span>
             </div>
           </div>
-          <div class="p-5">
+          <div class="flex flex-1 flex-col p-5">
             <h2 class="text-base font-semibold text-gray-900 dark:text-white">
               {{ t('home.features.dataPolicies') }}
             </h2>
@@ -278,7 +276,7 @@
               :href="docUrl"
               target="_blank"
               rel="noopener noreferrer"
-              class="mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-300"
+              class="mt-auto inline-flex items-center gap-1 self-start pt-4 text-sm font-medium home-feature-link text-link"
             >
               {{ t('home.docs') }}
               <Icon name="externalLink" size="xs" />
@@ -292,7 +290,7 @@
           <div>
             <router-link
               to="/models"
-              class="inline-flex items-center gap-2 text-2xl font-bold text-gray-950 hover:text-primary-600 dark:text-white dark:hover:text-primary-300"
+              class="inline-flex items-center gap-2 text-2xl font-bold text-link"
             >
               {{ t('home.providers.title') }}
               <Icon name="chevronRight" size="md" :animate-on-hover="false" />
@@ -304,10 +302,7 @@
               {{ t('home.stats.providerTypes') }}
             </p>
           </div>
-          <router-link
-            to="/models"
-            class="text-sm font-medium text-gray-500 transition hover:text-primary-600 dark:text-dark-400 dark:hover:text-primary-300"
-          >
+          <router-link to="/models" class="text-sm font-medium text-link">
             {{ t('home.viewAll') }}
             <Icon name="arrowRight" size="xs" class="inline-block" />
           </router-link>
@@ -333,7 +328,7 @@
             <article
               v-for="featured in featuredModels"
               :key="featured.model.id"
-              class="rounded-surface border border-gray-200 bg-white p-6 shadow-sm ring-1 ring-transparent transition duration-layout hover:-translate-y-1 hover:border-black/20 hover:shadow-[0_12px_32px_rgba(0,0,0,0.1)] focus-within:border-black/20 dark:border-dark-800 dark:bg-dark-900 dark:hover:border-dark-600 dark:hover:shadow-[0_12px_32px_rgba(0,0,0,0.4)]"
+              class="rounded-surface border border-gray-200 bg-white p-6 transition-colors duration-fast hover:border-black/20 focus-within:border-black/20 dark:border-dark-800 dark:bg-dark-900 dark:hover:border-dark-600"
             >
               <div class="flex items-start gap-4">
                 <!-- Featured cards use the marketplace model icons inside the shared rounded surface. -->
@@ -371,7 +366,7 @@
             <article
               v-for="provider in supportedProviders.slice(0, 6)"
               :key="provider.key"
-              class="rounded-surface border border-gray-200 bg-white p-6 shadow-sm ring-1 ring-transparent transition duration-layout hover:-translate-y-1 hover:border-black/20 hover:shadow-[0_12px_32px_rgba(0,0,0,0.1)] focus-within:border-black/20 dark:border-dark-800 dark:bg-dark-900 dark:hover:border-dark-600 dark:hover:shadow-[0_12px_32px_rgba(0,0,0,0.4)]"
+              class="rounded-surface border border-gray-200 bg-white p-6 transition-colors duration-fast hover:border-black/20 focus-within:border-black/20 dark:border-dark-800 dark:bg-dark-900 dark:hover:border-dark-600"
             >
               <div class="flex items-start gap-4">
                 <span
@@ -530,9 +525,8 @@
       </section>
     </main>
 
-    <footer
-      class="relative z-10 border-t border-gray-200 bg-white/90 px-6 py-12 backdrop-blur dark:border-dark-800 dark:bg-dark-950/90"
-    >
+    <!-- The footer shares the page backdrop in both themes, with a border separating it from the main content. -->
+    <footer class="relative z-10 border-t border-gray-200 px-6 py-12 dark:border-dark-800">
       <div class="mx-auto max-w-7xl">
         <div
           class="grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-3 lg:flex lg:justify-between lg:gap-8"
@@ -788,6 +782,8 @@ const homeMarqueeBrands = computed(() => {
   return [...brands, ...brands]
 })
 
+// Marketplace and aggregate statistics keep independent loading/error states so
+// one failed read can clear its content without discarding the other's result.
 const marketplaceGroups = ref<MarketplaceGroup[]>([])
 const homeStats = ref<MarketplaceStats | null>(null)
 const homeMarketplaceLoading = ref(true)
@@ -1031,6 +1027,7 @@ const homeProviderVisuals = computed(() => {
   return mergeProviderVisualBrands(brands)
 })
 
+// The marketplace action rotates through the provider categories present in the catalog.
 const homeMarketplaceButtonBrands = computed(() =>
   supportedProviders.value.map((provider) => provider.iconBrand),
 )
@@ -1298,6 +1295,7 @@ function mergeProviderVisualBrands(brands: string[]): string[] {
   return merged
 }
 
+// providerIconWrapClass applies the home-specific Antigravity palette before shared brand styling.
 function providerIconWrapClass(provider: Pick<HomeProviderSummary, 'key' | 'iconBrand'>): string {
   if (provider.key === 'antigravity') {
     return 'bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/15 dark:text-rose-200 dark:ring-rose-400/30'
@@ -1369,6 +1367,16 @@ useLocaleRefresh(fetchHomeMarketplace)
 </script>
 
 <style scoped>
+/* Stretch the native link over the illustration and draw its focus ring inside
+   the clipped card. The text remains the link's accessible label. */
+.home-feature-link::after {
+  @apply absolute inset-0 z-20 content-[''];
+}
+
+.home-feature-link:focus-visible::after {
+  @apply ring-2 ring-inset ring-primary-600 dark:ring-primary-500;
+}
+
 .home-marketplace-icon-enter-active,
 .home-marketplace-icon-leave-active {
   transition:

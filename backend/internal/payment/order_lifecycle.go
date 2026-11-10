@@ -24,7 +24,7 @@ import (
 // unfinished-fulfillment scans rotate copied ID pages under shared cursor
 // coordination, advancing selection before later reads or work succeed.
 // Pending reconciliation uses the store's bounded oldest unexpired
-// Alipay/WeChat/GMPay candidates instead. Cancellation-failure history adds an
+// Alipay/WeChat/EPUSDT EPay candidates instead. Cancellation-failure history adds an
 // updated_at cooldown, while stale processing is audited after a longer age.
 // Provider references retain merchant/session/invoice/payment identities
 // according to adapter query needs.
@@ -571,7 +571,7 @@ func (s *OrderLifecycle) VerifyOrderByOutTradeNo(ctx context.Context, outTradeNo
 // context is checked between rows, returning the count observed before
 // cancellation.
 //
-// The PostgreSQL candidate query chooses oldest unexpired Alipay/WeChat/GMPay method
+// The PostgreSQL candidate query chooses oldest unexpired Alipay/WeChat/EPUSDT EPay method
 // or provider labels. Per-order application errors are logged and skipped;
 // CheckPaid itself can convert query failures to empty,nil. Only already-paid
 // outcomes with nil error increase the count, which is an outcome observation

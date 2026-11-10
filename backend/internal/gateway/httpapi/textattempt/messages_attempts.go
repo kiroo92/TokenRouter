@@ -225,7 +225,8 @@ func (b *messageAttemptBridge) Intercept() bool {
 // Acquire obtains the selected provider slot and reports whether forwarding
 // can proceed. A retained selection lease is reused; otherwise a wait plan is
 // required, and successful waiting best-effort binds sticky identity before
-// execution.
+// execution. Acceptance freezes the initial HTTP admission timing before sticky
+// persistence; later acquisitions retain that first endpoint.
 //
 // Queue registration errors allow uncounted waiting, but an explicit full
 // queue rejects before slot polling. Only counted entries are released after
@@ -237,7 +238,9 @@ func (b *messageAttemptBridge) Acquire() bool {
 	// joins its explicit wait plan before provider forwarding can use the
 	// resource.
 	b.providerReleaseFunc = b.selection.ReleaseFunc
-	if !b.selection.Acquired {
+	if b.selection.Acquired {
+		gatewayhttp.MarkOpsProviderSlotAcquired(b.c)
+	} else {
 		if b.selection.WaitPlan == nil {
 			gatewayhttp.MarkOpsRoutingCapacityLimited(b.c)
 			b.reqLog.Warn("gateway.select_provider_no_slot_no_wait_plan",
@@ -294,6 +297,7 @@ func (b *messageAttemptBridge) Acquire() bool {
 		// Stop counting this request as waiting once its slot is
 		// acquired.
 		releaseWait()
+		gatewayhttp.MarkOpsProviderSlotAcquired(b.c)
 		b.reqLog.Info("sticky.bind_after_wait",
 			zap.String("session_key", b.sessionKey),
 			zap.Int64("provider_id", b.provider.Record.ID),
@@ -417,7 +421,7 @@ func (b *messageAttemptBridge) Forward(state textflow.AttemptState) textflow.Out
 	// Capture after queue waits so forwarding output can be distinguished
 	// from earlier keepalives when the outer loop decides whether replay
 	// remains permitted.
-	b.writerSizeBeforeForward = b.c.Writer.Size()
+	b.writerSizeBeforeForward = gatewayhttp.HeartbeatAdjustedWrittenSize(b.c)
 	if b.provider.Record.Platform == capability.PlatformAntigravity {
 		b.result, err = b.binding().forwardAntigravity(requestCtx, b.c, b.provider, attemptBody, b.hasBoundSession)
 	} else {
@@ -440,7 +444,7 @@ func (b *messageAttemptBridge) Forward(state textflow.AttemptState) textflow.Out
 	}
 	b.binding().reportSchedule(b.selection, b.provider.Record.ID, err == nil, b.result)
 
-	out := textflow.Outcome{Attempt: messageObservedAttempt(b.result, err), Err: err, HasResult: b.result != nil, OutputChanged: b.c.Writer.Size() != b.writerSizeBeforeForward}
+	out := textflow.Outcome{Attempt: messageObservedAttempt(b.result, err), Err: err, HasResult: b.result != nil, OutputChanged: gatewayhttp.HeartbeatAdjustedWrittenSize(b.c) != b.writerSizeBeforeForward}
 	out.Attempt.HTTPCommitted = b.c.Writer.Written()
 	out.Attempt.RetryCommitted = out.OutputChanged
 	var policy *anthropic.BetaBlockedError

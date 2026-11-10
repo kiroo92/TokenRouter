@@ -37,6 +37,11 @@ func ProvideRouter(cfg Options, runtime *RouterRuntime) *gin.Engine {
 	r := gin.New()
 	r.Use(middleware2.Recovery())
 	configureTrustedProxies(r, cfg)
+	var originProxies []string
+	if cfg.TrustedProxiesConfigured {
+		originProxies = cfg.TrustedProxies
+	}
+	r.Use(middleware2.RequestOrigin(originProxies))
 
 	return SetupRouter(r, runtime)
 }
@@ -53,14 +58,14 @@ func configureTrustedProxies(r *gin.Engine, cfg Options) {
 			_ = r.SetTrustedProxies(nil)
 		}
 		if len(cfg.TrustedProxies) == 0 && cfg.Mode == "release" {
-			log.Printf("Warning: server.trusted_proxies is explicitly empty; forwarded client IP trust is disabled")
+			log.Printf("Warning: server.client_ip.trusted_proxies is explicitly empty; forwarded client IP trust is disabled")
 		}
 	} else {
 		if err := r.SetTrustedProxies(nil); err != nil {
 			log.Printf("Failed to disable trusted proxies: %v", err)
 		}
 		if cfg.Mode == "release" {
-			log.Printf("Warning: server.trusted_proxies is not configured; disabling the forwarded-IP compatibility switch will use direct peer addresses only")
+			log.Printf("Warning: server.client_ip.trusted_proxies is not configured; disabling the forwarded-IP compatibility switch will use direct peer addresses only")
 		}
 	}
 }

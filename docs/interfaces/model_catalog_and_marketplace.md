@@ -1,6 +1,6 @@
 # 模型目录与市场
 
-本文描述可请求的模型目录如何根据分组、价格配置和提供商能力解析出来，又如何整理成公开模型市场上的品牌、价格、容量和可用性。供应商完整的动态模型清单会变化，本文不列出；最终的用量结算事务见[路由与结算](../domains/routing_and_billing.md)。
+本文描述可请求的模型目录如何根据分组、价格配置和提供商能力解析出来，又如何整理成公开与个人模型广场上的品牌、价格、容量和可用性。供应商完整的动态模型清单会变化，本文不列出；最终的用量结算事务见[路由与结算](../domains/routing_and_billing.md)。
 
 ## 章节导航
 
@@ -58,9 +58,14 @@ Claude Code、Codex、Gemini、Grok、OpenCode 和 CC Switch 的配置，按用�
 
 插件客户端可以通过 `/v1/models?include=capabilities` 查询最终可见 ID 的协议和共同属性，包含别名与复合前缀。该参数不扩大模型可见范围，不改变默认响应；字段和继承规则见 [Magpie 插件模型发现](magpie_import.md#plugin_models)。
 
+<a id="marketplace_visibility"></a>
 ## 市场可见性
 
-公开市场只返回处于 active、非 exclusive、并且至少有一个 active 提供商的分组；解析后没有可请求模型的分组也会被隐藏。排序使用分组手动设置的顺序；市场不会按临时价格或实时错误重新排列。
+公开接口 `/api/v1/marketplace/models` 只返回处于 active、非 exclusive、并且至少有一个 active 提供商的分组；解析后没有可请求模型的分组也会被隐藏。首页继续使用公开接口。
+
+登录后的模型广场使用 JWT 接口 `/api/v1/marketplace/models/available`，在公开分组之外展示当前用户 `AllowedGroups` 授权的专属分组。管理员同样按本人授权查询。授权来自当前账户存储，读取失败返回错误；客户端不能指定其他用户或授权范围。专属分组仍须满足启用、活跃提供商和可请求模型条件，容量与探测历史只查询筛选后的可见分组。个人响应使用 `Cache-Control: private, no-store`。
+
+市场分组响应的 `is_exclusive` 标识专属分组，页面在品牌标签前显示带皇冠图标的金色「专属」胶囊标签，并将专属分组置顶。两类内部按后台顺序和 ID 排序；市场不会按临时价格或实时错误重新排列。公开分组仍可浏览，个人禁用列表不影响市场展示；价格沿用分组报价，不应用个人倍率或团队范围。账户变化会立即清除页面旧目录，请求代次与账户身份检查阻止迟到响应恢复旧数据。
 
 模型广场在同一页纵向展示匹配分组，每组摘要显示品牌、名称、优惠、倍率和可用率。模型默认收起，摘要下方居中的文字和小箭头用于展开或收起，各组可以独立打开。每组每页展示 12 个模型，搜索和筛选覆盖完整目录；收起分组保留页码，修改筛选条件重置页码。翻页后滚动到对应分组的展开入口，为固定顶栏留出空间。
 
@@ -88,7 +93,7 @@ TypeSafe 品牌键为 `typesafe`，`jev`、`jev-latest` 和 `typesafe/jev-latest
 
 `modelcatalog` 解析 models.dev 的统一目录，负责供应商身份索引、属性和内容版本。`modelcatalog/provider.Service` 在应用生命周期内下载、缓存，并原子发布统一目录和它的价格数据；`billing/pricing` 把目录报价归一化为 `CatalogModelPricing` 计费模型，并解释本地补充和计费规则。app 的目录装配只创建一个运行实例，计费和属性的使用方共用它。目录维护的步骤封装在运行时里，对外提供生命周期、查询、快照和强制更新。价格和属性一起更新；候选目录失败时继续使用上一有效版本。成功发布时生成排序后的型号、属性检索和价格分类索引。普通查询复用内存目录，单型号按身份索引查询；管理列表先筛选分页，再复制返回条目。本地补充文件有变化时，目录版本同时包含它的内容指纹。代理失败的策略和 URL 校验，由现有的出站规则执行。
 
-生产环境只使用 models.dev 的加载流程，远程入口是 `https://models.dev/catalog.json?type=all`，按 `pricing.check_interval_minutes` 检查（默认每 10 分钟），使用 ETag 条件请求和本地的内容摘要；管理员可以强制更新。程序内嵌了一份经过解析验证的压缩离线快照和官方价格补充，并附上 models.dev 的 MIT 许可。官方补充随二进制一起升级和回退，不依赖外部的资源目录。首次启动和网络故障时，可以使用磁盘上或内嵌的离线目录；缓存文件是 `models_dev_catalog.json`，完整解析成功后，通过临时文件替换。管理员接口返回版本、最近一次成功更新的时间和最近一次更新的错误。本地文件在合并之前，把旧的 `litellm_provider` 归一化为 `provider`，同时有新字段时（包括空值和 `null`）以新字段为准；内部的来源分类是 `catalog`，不会覆盖实际的数据出处。远程返回 304 时，本地层照常校验。
+生产环境只使用 models.dev 的加载流程，远程入口是 `https://models.dev/catalog.json?type=all`，按 `model_catalog.check_interval_minutes` 检查（默认每 10 分钟），使用 ETag 条件请求和本地的内容摘要；管理员可以强制更新。程序内嵌了一份经过解析验证的压缩离线快照和官方价格补充，并附上 models.dev 的 MIT 许可。官方补充随二进制一起升级和回退，不依赖外部的资源目录。首次启动和网络故障时，可以使用磁盘上或内嵌的离线目录；缓存文件是 `models_dev_catalog.json`，完整解析成功后，通过临时文件替换。管理员接口返回版本、最近一次成功更新的时间和最近一次更新的错误。本地文件在合并之前，把旧的 `litellm_provider` 归一化为 `provider`，同时有新字段时（包括空值和 `null`）以新字段为准；内部的来源分类是 `catalog`，不会覆盖实际的数据出处。远程返回 304 时，本地层照常校验。
 
 OpenCode 的服务模型索引保留 `opencode` 和 `opencode-go` 的编码及 canonical 属性身份，供同步、路由和属性解析使用。缺少 canonical 声明时，只接受完整型号匹配到唯一公共作者模型的关系。属性解析读取当前生效目录中的这个关系，计费身份和渠道价格筛选保持独立，详见 [OpenCode 上游](opencode_upstream.md#opencode_routing)。
 
@@ -120,7 +125,7 @@ GPT-5.6 系列按完整型号查询目录。`gpt-5.6-sol/terra/luna` 与裸的 `
 
 models.dev 的目录、属性和本地补充在同一个版本里发布，只读快照使用同样的完整身份规则。原厂的裸名和明确的供应商记录，按来源索引查询；手动填写的零价和本地新增的条目保持有效；未知型号不会按目录的遍历顺序选价格。
 
-目录从 `https://models.dev/catalog.json?type=all` 读取，包括 Jev 所属的 decision 类型。TypeSafe 直连型号的缺失属性由模型补充文件填写，第三方渠道报价按上述筛选规则排除。特殊模型可以进入属性目录和查价索引，网关可请求性仍由提供商配置及协议判断。
+目录从 `https://models.dev/catalog.json?type=all` 读取，包括 Jev 所属的 decision 类型。Jev 1.13、1.14 及 latest/preview 的图片输入和附件能力由目录或已核验的补充文件提供，输出仍为 text 类型的结构化决策。TypeSafe 直连型号的缺失属性由模型补充文件填写，第三方渠道报价按上述筛选规则排除。特殊模型可以进入属性目录和查价索引，网关可请求性仍由提供商配置及协议判断。
 
 <a id="model_catalog_origins"></a>
 ## 原厂归属
@@ -167,7 +172,7 @@ xAI 达到上下文阈值就切换价格。转换层把这类目录阶梯的内�
 
 `source` 和 `price_sources` 区分 models.dev、本地补充和规则补充。补充只填缺失的字段，目录里明确的零价同样优先；自定义补充优先于内嵌补充，媒体尺寸表等复合字段整体选择一个来源，不会因为条目同名而覆盖目录的现价。补充按"提供方加原始模型 ID"，同步到同一个原厂记录的裸名和限定名：先应用精确的键，再填补其他等价名称的空缺；日期版本和中继记录不共享补充。
 
-官方补充的维护源是 `backend/internal/modelcatalog/model_supplements.json`，通过 `go:embed` 编进二进制；`pricing.fallback_file` 默认为空，只读取手动配置的自定义补充。自定义文件删除后，恢复内嵌的值；文件损坏时，保留上一次有效的目录。官方补充按完整型号保存目录缺失的已核实价格和属性，并记录 `source_url` 和 `verified_at`。价格字段放在模型条目内，展示属性放在同一条目的 `attributes` 对象中。内嵌和自定义补充共用该格式，目录已有值优先，其次是自定义补充，最后是内嵌补充。补充属性按字段合并，false 和空模态数组都有明确含义。旧的顶层模态字段继续用于价格兼容解析，展示层读取 `attributes`。型号专属的 Fast/Flex、Max、缓存写入和峰谷数值，不写在 Go 代码里；需要时，通过 `fast_multiplier`、`flex_multiplier`、`max_reasoning_effort_multiplier`、`cache_write_multiplier`、`cache_write_1h_multiplier` 和 `time_pricing` 明确声明。没有规则时，不会根据型号生成加价或折扣。Fast 的缓存写入价格，对所有来源按同一规则缩放 5m 和 1h 两种 TTL 的费用，来源标签和收费无关。
+官方补充的维护源是 `backend/internal/modelcatalog/model_supplements.json`，通过 `go:embed` 编进二进制；`model_catalog.supplement_file` 默认为空，只读取手动配置的自定义补充。自定义文件删除后，恢复内嵌的值；文件损坏时，保留上一次有效的目录。官方补充按完整型号保存目录缺失的已核实价格和属性，并记录 `source_url` 和 `verified_at`。价格字段放在模型条目内，展示属性放在同一条目的 `attributes` 对象中。内嵌和自定义补充共用该格式，目录已有值优先，其次是自定义补充，最后是内嵌补充。补充属性按字段合并，false 和空模态数组都有明确含义。旧的顶层模态字段继续用于价格兼容解析，展示层读取 `attributes`。型号专属的 Fast/Flex、Max、缓存写入和峰谷数值，不写在 Go 代码里；需要时，通过 `fast_multiplier`、`flex_multiplier`、`max_reasoning_effort_multiplier`、`cache_write_multiplier`、`cache_write_1h_multiplier` 和 `time_pricing` 明确声明。没有规则时，不会根据型号生成加价或折扣。Fast 的缓存写入价格，对所有来源按同一规则缩放 5m 和 1h 两种 TTL 的费用，来源标签和收费无关。
 
 `image_prices` 按 1K、2K、4K 保存美元每张，`video_prices` 按分辨率标签保存美元每秒，支持 `768p`、`2k` 等自定义档位；缺失的维度保持缺价，不套用通用的尺寸倍率。旧的 `output_cost_per_image` 仍然表示不分尺寸的单张价格。操作价格在保留节点 `_billing_defaults` 里，自定义的值按字段叠加到内嵌的默认值上，保留明确的零价，不会进入模型列表；它们和价格、属性一起校验、发布和复制。历史账单和任务的资金快照不会重算。
 
@@ -245,6 +250,12 @@ HTTP 请求和媒体执行使用固定的目录版本，同一分组的配置读
 
 OpenCode 导出显示名、附件、推理、温度、工具调用、模态和长度。它要求 `limit.context` 与 `limit.output` 同时存在，缺少其中一项时省略 `limit`。它的 schema 无法表达条件能力，条件温度与工具调用按 false 导出。Grok 模型列表的可调推理档位也读取分组解析结果。
 
+### GPT Image 2.6 补充
+
+内嵌补充登记 `gpt-image-2.6-sunburst` 和 `gpt-image-2.6-flare` 的文字／图片输入与图片输出，以及官方 token 单价。每百万 token 的美元价格为：文字输入 5、文字缓存输入 1.25、图片输入 8、图片缓存输入 2、图片输出 30。图片缓存单价由 `cache_read_input_image_token_cost` 保存，默认价格页单独展示；未报告的图片缓存用量不推算。
+
+两个完整型号遵循现有缺项补充和管理员覆盖规则，不为裸的 `gpt-image-2.6` 创建隐式别名，也不从 token 费率推导固定按张售价。创作台仍需要可用的按张价卡。媒体参数增加 `xhigh`、`max` 和 GIF，提供商关闭 GIF 后不参与该格式的选路。
+
 ### 平台执行规则
 
 - OpenAI 使用目录的 effort 集合。GPT-5.2/5.4 的采样参数在 effort 为 none 时可用；GPT-6 的 Chat 工具能力依型号与 effort 设置条件。Codex OAuth 禁用采样与输出参数字段，模型的输出容量仍保留。Spark 的当前接入为文本输入。GPT-5.6 Sol/Terra/Luna 的 OAuth Compact 将 max 编码成 xhigh，规则在最终型号确定后执行。
@@ -274,7 +285,7 @@ OpenCode 导出显示名、附件、推理、温度、工具调用、模态和�
 
 探测轮次、重试和最终结果的编排由 `routing` 负责，租约、原子保存和历史时间桶的查询在 `routing/postgres`；`routing/provider` 提供 cron 日历调度和平台目录数据。app 注入实例标识、时区和执行接口，提供商选择由 `gateway/provider/selection` 提供，探测执行复用 `provider.TestService`，通过 app 构造的 Probe 适配连接。构造时不启动；重复调用 Start 或 Stop 不会注册新任务；停止时，取消维护、领取和请求的预算，并在生命周期的后台总预算内等待在途操作。超时时返回失败，不算排空完成；还没保存的领取，按 PostgreSQL 租约到期的规则恢复。
 
-每个实例的 runner 不允许分钟级的 cron 轮次重叠；单轮领取的到期分组不超过实例的 worker 数，每个领取到的分组都能立即执行，PostgreSQL 租约防止其他实例重复领取。维护、领取和每个分组的探测，分别有独立的超时预算，慢的维护不会挤占合法的重试时间。管理分组 API 里不合法的 `availability_probe_config`，统一返回 HTTP `400`，reason 是 `INVALID_AVAILABILITY_PROBE_CONFIG`。
+探测 runner 不允许分钟级的 cron 轮次重叠；单轮领取的到期分组不超过 worker 数，每个领取到的分组都能立即执行。PostgreSQL 租约保护任务领取，未完成的领取在租约到期后恢复。维护、领取和每个分组的探测，分别有独立的超时预算，慢的维护不会挤占合法的重试时间。管理分组 API 里不合法的 `availability_probe_config`，统一返回 HTTP `400`，reason 是 `INVALID_AVAILABILITY_PROBE_CONFIG`。
 
 永久性的模型可用性诊断由 `routing.ModelAvailability` 执行，通过单独的持久候选查询，区分"模型不存在"和"暂时容量不足"。所有入口都按明确的组内关联查询候选，Antigravity 提供商也不会扩大成员范围；查询失败或无法诊断时，交给 503 分支处理，暂时的限流不会被误报为 404。
 

@@ -20,12 +20,14 @@
         :id="id"
         ref="inputRef"
         :type="type"
+        :inputmode="inputmode"
         :value="modelValue"
         :disabled="disabled"
         :required="required"
         :placeholder="placeholderText"
         :autocomplete="autocomplete"
         :readonly="readonly"
+        :maxlength="maxlength"
         :class="[
           'input w-full transition duration-normal',
           $slots.prefix ? 'input-has-icon' : '',
@@ -68,11 +70,13 @@ interface Props {
   // when the supplied value is null or undefined.
   modelValue: string | number | null | undefined
   type?: string // Native input type attribute.
+  inputmode?: 'text' | 'decimal' | 'numeric' // Native keyboard input hint.
   label?: string // Visible field label text.
   placeholder?: string // Empty field placeholder text.
   disabled?: boolean // Disables user control interaction.
   required?: boolean // Native required validation flag.
   readonly?: boolean // Native read-only input flag.
+  maxlength?: number // Native maximum text length.
   // Error text replaces the hint and applies error styling when nonempty; empty or
   // omitted errors permit the hint to remain visible.
   error?: string

@@ -7,12 +7,19 @@ import (
 	"testing"
 )
 
-// TestDependencyBoundaries 检查各目录角色的允许依赖和禁止依赖。
+// policy_test.go checks architecture dependency boundaries and scanner coverage.
+// Positive fixtures permit reviewed collaborations, while neighboring-file
+// fixtures keep narrow allowances from widening module or standard-library
+// access. Consumer checks require every configured exception to retain a real import.
+
+// TestDependencyBoundaries checks permitted imports and forbidden dependencies
+// for each directory role. File-specific allowances must not authorize nearby
+// files, production counterparts, or broader target subpackages.
 func TestDependencyBoundaries(t *testing.T) {
 	cases := []struct {
-		file     string
-		imported string
-		allowed  bool
+		file     string // importing source file path
+		imported string // candidate dependency import path
+		allowed  bool   // expected dependency admission result
 	}{
 		{"migrations/platform_independent_pricing_integration_test.go", modulePath + "/internal/billing/pricing", false},
 		{"migrations/helpers_test.go", modulePath + "/internal/billing/pricing", false},
@@ -31,10 +38,33 @@ func TestDependencyBoundaries(t *testing.T) {
 		{"internal/provider/postgres/new.go", "database/sql", true},
 		{"internal/search/postgres/new.go", "database/sql", true},
 		{"internal/search/new.go", modulePath + "/internal/search/postgres", false},
+		{"internal/plugin/httpapi/helpers_test.go", modulePath + "/internal/identity", true},
+		{"internal/plugin/httpapi/proxy.go", modulePath + "/internal/identity", false},
+		{"internal/plugin/runtime.go", modulePath + "/plugin-sdk/go/pluginpb/v1", true},
+		{"internal/plugin/catalog.go", modulePath + "/plugin-sdk/go/index", true},
+		{"internal/plugin/service.go", modulePath + "/plugin-sdk/go/sdk", false},
+		{"internal/plugin/service.go", modulePath + "/plugin-sdk/go/pkgfmt", false},
+		{"internal/plugin/service.go", "github.com/hashicorp/go-plugin", false},
+		{"internal/plugin/provider/process.go", "github.com/hashicorp/go-plugin", true},
+		{"internal/plugin/provider/process.go", modulePath + "/plugin-sdk/go/sdk", true},
 		{"internal/search/helper/postgres/new.go", "database/sql", false},
 		{"internal/protocol/openai/helpers/new.go", "os", false},
 		{"internal/protocol/openai/new_test.go", "net/http", false},
 		{"internal/protocol/openai/new.go", "bytes", true},
+		{"internal/protocol/systemone/payload.go", "mime", true},
+		{"internal/protocol/systemone/payload.go", "mime/multipart", true},
+		{"internal/protocol/systemone/payload_test.go", "mime/multipart", true},
+		{"internal/protocol/systemone/new.go", "mime/multipart", false},
+		{"internal/protocol/systemone/new_test.go", "mime/multipart", false},
+		{"internal/protocol/systemone/payload.go", "os", false},
+		{"internal/protocol/systemone/references_test.go", "math/rand/v2", true},
+		{"internal/protocol/systemone/references_test.go", "runtime", true},
+		{"internal/protocol/systemone/references.go", "math/rand/v2", false},
+		{"internal/protocol/systemone/new_test.go", "runtime", false},
+		{"internal/server/middleware/api_key_model_scenario_test.go", modulePath + "/internal/protocol/systemone", true},
+		{"internal/server/middleware/new_test.go", modulePath + "/internal/protocol/systemone", false},
+		{"internal/server/httpx/new_test.go", modulePath + "/internal/protocol/systemone", false},
+		{"internal/server/middleware/api_key_model_scenario.go", modulePath + "/internal/protocol/systemone", false},
 		{"internal/protocol/openai/new.go", modulePath + "/internal/protocol/bridge", false},
 		{"internal/protocol/bridge/new.go", modulePath + "/internal/protocol/openai", true},
 		{"internal/billing/pricing/new.go", modulePath + "/internal/billing", false},
