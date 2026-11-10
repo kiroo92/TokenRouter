@@ -22,11 +22,11 @@ import (
 	settingscore "github.com/TokenFlux/TokenRouter/internal/settings"
 )
 
-// marketplace_external_test.go verifies public marketplace assembly of model
-// identity, pricing identity, route attributes, and observations. The batch
-// fixture returns one alias for two visible groups, exposing which identities
+// marketplace_external_test.go verifies public and authorized marketplace
+// assembly of model identity, pricing identity, route attributes, and observations.
+// The batch fixture returns one alias for two visible groups, exposing which identities
 // reach pricing and attribute callbacks and which groups receive optional
-// capacity and probe-history reads.
+// capacity and passive-history reads.
 //
 // Pricing scenarios use the shared production resolver with offline catalog
 // data or explicit configuration cards, covering missing prices, free
@@ -1119,8 +1119,9 @@ func TestMarketplaceUsesRouteAttributes(t *testing.T) {
 }
 
 // TestMarketplaceExclusiveVisibility grants a private group alongside a public
-// catalog. Grants control every enrichment read, while provider/model exclusions,
-// public-only access, category order, and unchanged pricing remain observable.
+// catalog. Grants control every enrichment read, including passive history for
+// visible groups with active probing disabled. Provider/model exclusions,
+// public-only access, category order, and pricing remain observable.
 func TestMarketplaceExclusiveVisibility(t *testing.T) {
 	for _, includeCapacity := range []bool{false, true} {
 		groups := &marketplaceGroupRepoStub{groups: []routing.Group{
@@ -1140,7 +1141,7 @@ func TestMarketplaceExclusiveVisibility(t *testing.T) {
 		require.Equal(t, int64(2), result[1].ID)
 		require.False(t, result[1].IsExclusive)
 		require.Equal(t, 2.0, result[0].Models[0].Pricing.InputPricePerToken)
-		require.Equal(t, []int64{1}, observations.availabilityGroups)
+		require.Equal(t, []int64{1, 2}, observations.availabilityGroups)
 		require.NotNil(t, result[0].Availability)
 		if includeCapacity {
 			require.Equal(t, []int64{1, 2}, observations.capacityGroups)
@@ -1153,8 +1154,10 @@ func TestMarketplaceExclusiveVisibility(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, public, 1)
 		require.Equal(t, int64(2), public[0].ID)
+		require.Equal(t, []int64{2}, observations.availabilityGroups)
 		denied, err := svc.ListVisible(context.Background(), []int64{99}, routing.MarketplaceListOptions{})
 		require.NoError(t, err)
 		require.Equal(t, public, denied)
+		require.Equal(t, []int64{2}, observations.availabilityGroups)
 	}
 }

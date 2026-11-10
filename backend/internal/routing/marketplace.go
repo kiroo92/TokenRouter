@@ -254,7 +254,7 @@ type Marketplace struct {
 	requestable  RequestableResolver     // prefetched-provider model eligibility resolver
 	prices       MarketplacePrices       // public model quote reader
 	capacity     MarketplaceCapacity     // optional runtime capacity reader
-	availability MarketplaceAvailability // optional probe-history summary reader
+	availability MarketplaceAvailability // optional passive-history summary reader
 	options      MarketplaceOptions      // attribute and observation callbacks
 }
 

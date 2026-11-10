@@ -5,6 +5,7 @@ import type { NavigationGuard, Router, RouterOptions } from 'vue-router'
 // installed authentication guard for focused navigation assertions. Tests use
 // Vue Router's matcher to obtain metadata while store and setup responses
 // remain controllable, so permissions are evaluated by the production guard.
+// Plugin descriptions stay empty unless a title-focused test supplies them.
 
 // routerHarness retains the current router and installed guard across the mock
 // factory and test helpers; resetRouterHarness replaces both before each test.
@@ -60,6 +61,9 @@ vi.mock('@/stores/app', () => ({ useAppStore: () => appStore }))
 vi.mock('@/stores/adminSettings', () => ({
   useAdminSettingsStore: () => ({ customMenuItems: [] }),
 }))
+// Plugin discovery supplies an empty accepted catalog so permission fixtures
+// can exercise navigation without initializing the application's real Pinia stores.
+vi.mock('@/stores/plugins', () => ({ usePluginsStore: () => ({ plugins: [] }) }))
 vi.mock('@/api/setup', () => ({ getSetupStatus: setupStatus }))
 vi.mock('@/router/navigationLoading', () => ({ installNavigationLoading: vi.fn() }))
 vi.mock('@/composables/useRoutePrefetch', () => ({
